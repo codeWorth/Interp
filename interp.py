@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.io import wavfile
+from matplotlib import pyplot as plt
 
 semitone = 0.06
 newRate = 1 - 0.5*semitone
@@ -80,59 +81,38 @@ def upsampleCurve(startK, endK, startOffset, endOffset, length, sampleRate):
     return outU
 
 def fast_sinc_interp(x, s, u):
-    # when finding sinc_, align both arrays to the start of each other (u[0] - s[0])
-    # columns to the left of u[0] - s[0] are u[n:] - s[:-n], aligned to the top
-    # columns to the right of u[0] - s[0] are u[:-n] - s[n:], aligned to the bottom
-    # all other values are 0
-    # to get diags aligned, b = np.lib.stride_tricks.as_strided(out, (3,3), (24,32))
-    # where (3,3) is (m,n), n=window, m=(length of data-n//2)
-    # (24,32) is (I,J), where I=orig stride value and J=I+sizeof(dtype)
-    # to get data subsections, a = np.lib.stride_tricks.sliding_window_view(x, 3), where 3 is n
-    # to do dot product, np.sum(a*b, axis=1)
+    """
+    1. Find the indecies of s which are closest to the values in u (i.e. u[0] is closest to s[0], u[10] is closest to s[6])
+    2. Extract the N surrounding values in s and u to s_wind and u_wind
+    3. Extract the N surrounding values around each s index from x into x_wind
+    4. Perform x_wind * sinc((u_wind-s_wind)/(s[1]-s[0]))
+    """
 
-    # its best if window size is odd
-    window_size = 5
-    length = x.shape[0]-window_size//2
+    window_size = 999 # must be odd
     
-    diagLen = np.min([s.shape[0], u.shape[0]])
-    diags = np.zeros((diagLen, window_size), dtype=x.dtype)
+    s_i = 0
+    s_indecies = np.empty(u.shape[0], dtype=np.int32)
+    for u_i in range(u.shape[0]):
+        while (s_i < s.shape[0]-1 and u[u_i] > s[s_i]): # this produces non-ideal results if s increases faster than u
+            s_i += 1
 
-    # left side diags
-    for k in range(1, window_size//2+1):
-        subUEnd = np.min([u.shape[0], k+diagLen])
-        subU = u[k:subUEnd]
-        subS = s[:subU.shape[0]]
+        s_indecies[u_i] = s_i
 
-        # alligned to top of diags, so ignore end # = diff
-        skip = diagLen - subU.shape[0]
-        if skip > 0:
-            diags[:-skip,(window_size//2-k)] = subU - subS
-        else:
-            diags[:,(window_size//2-k)] = subU - subS
+    delta = s[1] - s[0]
+    x = np.pad(x, (window_size//2, window_size//2), constant_values=(0,0))
+    s = np.pad(s, (window_size//2, window_size//2), constant_values=(0,0))
+    u = np.pad(u, (window_size//2, window_size//2), constant_values=(0,0))
 
-    # center diag
-    diags[:,window_size//2] = u[:diagLen] - s[:diagLen]
+    x_wind = np.lib.stride_tricks.sliding_window_view(u, window_size)[s_indecies]
+    s_wind = np.lib.stride_tricks.sliding_window_view(s, window_size)[s_indecies]
+    u_wind = np.lib.stride_tricks.sliding_window_view(u, window_size)
 
-    # right side diags
-    for k in range(1, window_size//2+1):
-        # s[k:] must be length diagLen at most
-        subSEnd = np.min([s.shape[0], k+diagLen])
-        subS = s[k:subSEnd]
-        # since subS is diagLen at most, it's never longer than u
-        # u length must be equal to s
-        subU = u[:subS.shape[0]]
+    dt = (u_wind-s_wind)/delta
+    plt.plot(dt[:,0])
+    plt.show()
 
-        # alligned to bottom of diags, so skip ahead by diff
-        skip = diagLen - subS.shape[0] # never less than 0 since subS.shape[0] <= diagLen
-        diags[skip:,(window_size//2+k)] = subU - subS
-
-        print(k, subSEnd, subS, subU, skip)
-
-    diagsStrided = np.lib.stride_tricks.as_strided(diags, 
-        (diagLen-window_size//2, window_size), 
-        (diags.strides[0], diags.strides[0] + diags.strides[1]))
-
-    return diags, diagsStrided
+    sinc_ = np.sinc(dt)
+    return np.sum(x_wind*sinc_, axis=1)
 
 def sinc_interpolation(x, s, u):
     """Whittaker–Shannon or sinc or bandlimited interpolation.
@@ -163,6 +143,9 @@ def main():
     s = np.arange(0, size*maxCount) * (1 / samplerate)
     u = upsampleCurve(newRate, 1.0, startHold, endHold, s.shape[0], samplerate)
     outData = np.zeros((u.shape[0], 2), dtype=np.int32)
+
+    fast_sinc_interp(data,s,u)
+    exit()
     
     while (count < maxCount):
         nonPadStart = count*size
