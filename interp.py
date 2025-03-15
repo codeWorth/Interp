@@ -2,7 +2,7 @@ import numpy as np
 from scipy.io import wavfile
 
 semitone = 0.06
-newRate = 1 - semitone/2
+newRate = 1 - 0.5*semitone
 
 startHold = 1.5
 endHold = 1.5
@@ -78,6 +78,61 @@ def upsampleCurve(startK, endK, startOffset, endOffset, length, sampleRate):
     print("Counts =", startU.shape[0], midU.shape[0], endU.shape[0])
 
     return outU
+
+def fast_sinc_interp(x, s, u):
+    # when finding sinc_, align both arrays to the start of each other (u[0] - s[0])
+    # columns to the left of u[0] - s[0] are u[n:] - s[:-n], aligned to the top
+    # columns to the right of u[0] - s[0] are u[:-n] - s[n:], aligned to the bottom
+    # all other values are 0
+    # to get diags aligned, b = np.lib.stride_tricks.as_strided(out, (3,3), (24,32))
+    # where (3,3) is (m,n), n=window, m=(length of data-n//2)
+    # (24,32) is (I,J), where I=orig stride value and J=I+sizeof(dtype)
+    # to get data subsections, a = np.lib.stride_tricks.sliding_window_view(x, 3), where 3 is n
+    # to do dot product, np.sum(a*b, axis=1)
+
+    # its best if window size is odd
+    window_size = 5
+    length = x.shape[0]-window_size//2
+    
+    diagLen = np.min([s.shape[0], u.shape[0]])
+    diags = np.zeros((diagLen, window_size), dtype=x.dtype)
+
+    # left side diags
+    for k in range(1, window_size//2+1):
+        subUEnd = np.min([u.shape[0], k+diagLen])
+        subU = u[k:subUEnd]
+        subS = s[:subU.shape[0]]
+
+        # alligned to top of diags, so ignore end # = diff
+        skip = diagLen - subU.shape[0]
+        if skip > 0:
+            diags[:-skip,(window_size//2-k)] = subU - subS
+        else:
+            diags[:,(window_size//2-k)] = subU - subS
+
+    # center diag
+    diags[:,window_size//2] = u[:diagLen] - s[:diagLen]
+
+    # right side diags
+    for k in range(1, window_size//2+1):
+        # s[k:] must be length diagLen at most
+        subSEnd = np.min([s.shape[0], k+diagLen])
+        subS = s[k:subSEnd]
+        # since subS is diagLen at most, it's never longer than u
+        # u length must be equal to s
+        subU = u[:subS.shape[0]]
+
+        # alligned to bottom of diags, so skip ahead by diff
+        skip = diagLen - subS.shape[0] # never less than 0 since subS.shape[0] <= diagLen
+        diags[skip:,(window_size//2+k)] = subU - subS
+
+        print(k, subSEnd, subS, subU, skip)
+
+    diagsStrided = np.lib.stride_tricks.as_strided(diags, 
+        (diagLen-window_size//2, window_size), 
+        (diags.strides[0], diags.strides[0] + diags.strides[1]))
+
+    return diags, diagsStrided
 
 def sinc_interpolation(x, s, u):
     """Whittaker–Shannon or sinc or bandlimited interpolation.
@@ -193,7 +248,7 @@ def main():
         print("Output", count, startUIndex+startUPadding)
         count += 1
         
-    wavfile.write('tts_slowed_speedsct_nolmt_combo.wav', samplerate, outData)
+    wavfile.write('tts_speedsct_nolmt_combo.wav', samplerate, outData)
     print("Wrote output data.")
 
 if __name__ == '__main__':
