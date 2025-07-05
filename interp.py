@@ -1,6 +1,7 @@
 import numpy as np
-from scipy.io import wavfile
+import wavio
 import argparse
+from matplotlib import pyplot as plt
 
 def integersWithin(a, b):
     """
@@ -133,10 +134,14 @@ def sinc_interpolation(x, s, u):
     return np.dot(x, sinc_)
 
 def main(inFile, outFile, startRate, endRate, startHold, endHold, useSlow):
-    samplerate, data = wavfile.read(inFile)
+    wavfile = wavio.read(inFile)
+    samplerate = wavfile.rate
+    data = wavfile.data
     print("Loaded", samplerate, data.shape, data.dtype, "... rate from", startRate, "to", endRate)
 
     length = data.shape[0]
+
+    print(data.max())
 
     s = np.arange(0, length) * (1 / samplerate)
     u = upsampleCurve(startRate, endRate, startHold, endHold, length, samplerate)
@@ -149,8 +154,10 @@ def main(inFile, outFile, startRate, endRate, startHold, endHold, useSlow):
     outData = np.empty((u.shape[0], 2), dtype=np.int32)
     outData[:,0] = interpFunc(data[:,0], s, u).astype(np.int32)
     outData[:,1] = interpFunc(data[:,1], s, u).astype(np.int32)
+
+    print(outData.max())
         
-    wavfile.write(outFile, samplerate, outData.astype(np.int32))
+    wavio.write(outFile, outData.astype(np.int32), samplerate, sampwidth=3)
     print("Wrote output data to", outFile)
 
 if __name__ == '__main__':
