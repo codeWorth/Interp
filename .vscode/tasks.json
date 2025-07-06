@@ -7,8 +7,7 @@
 			"command": "C:\\msys64\\mingw64\\bin\\gcc.exe",
 			"args": [
 				"-fdiagnostics-color=always",
-				"-O3",
-				"-g",
+				"-O3", "-march=native",
 				"${file}",
 				"-o",
 				"${fileDirname}\\${fileBasenameNoExtension}.exe"
@@ -28,8 +27,7 @@
 			"command": "C:\\msys64\\mingw64\\bin\\gcc.exe",
 			"args": [
 				"-fdiagnostics-color=always",
-				"-O3", "-S",
-				"-g",
+				"-O3", "-S", "-march=native",
 				"${file}",
 				"-o",
 				"${fileDirname}\\${fileBasenameNoExtension}.asm"

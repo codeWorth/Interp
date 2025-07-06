@@ -70,7 +70,7 @@ def upsampleCurve(startK, endK, startOffset, endOffset, length, sampleRate):
 
     return outU
 
-def fast_sinc_interp(x, s, u, window_size=1023):
+def fast_sinc_interp(x, s, samplerate, u, window_size=1023):
     """
     Uses sinc interpolation, but only uses samples in a window around the target sample.
     Args:
@@ -89,27 +89,19 @@ def fast_sinc_interp(x, s, u, window_size=1023):
     """
 
     assert (window_size%2 == 1)
-    assert (x.shape[0] == s.shape[0])
 
-    print("Fast interp", s.shape[0], "=>", u.shape[0], ", window size =", window_size)
+    print("Fast interp", x.shape[0], "=>", u.shape[0], ", window size =", window_size)
 
     s_i = 0
-    s_indecies = np.empty(u.shape[0], dtype=np.int32)
-    for u_i in range(u.shape[0]):
-        while (s_i < s.shape[0]-1 and u[u_i] > s[s_i]): # this produces non-ideal results if s increases faster than u
-            s_i += 1
+    s_indecies = np.floor(u * samplerate).astype(np.int32)
 
-        s_indecies[u_i] = s_i
-
-
-    delta = s[1] - s[0]
     x = np.pad(x, (window_size//2, window_size//2), constant_values=(0,0))
-    s = np.pad(s, (window_size//2, window_size//2), constant_values=(0,0))
+    s = np.pad(np.arange(x.shape[0]) / samplerate, (window_size//2, window_size//2), constant_values=(0,0))
 
     x_wind = np.lib.stride_tricks.sliding_window_view(x, window_size)[s_indecies]
     s_wind = np.lib.stride_tricks.sliding_window_view(s, window_size)[s_indecies]
 
-    dt = (u[:,None]-s_wind)/delta
+    dt = (u[:,None]-s_wind) * samplerate
     print("...dt")
     sinc_ = np.sinc(dt)
     print("...sinc, error less than", np.max(sinc_[window_size//2:-window_size//2,0]))
@@ -147,17 +139,15 @@ def main(inFile, outFile, startRate, endRate, startHold, endHold, useSlow):
     u = upsampleCurve(startRate, endRate, startHold, endHold, length, samplerate)
 
     if useSlow:
-        interpFunc = sinc_interpolation
+        outData = np.empty((u.shape[0], 2), dtype=np.int32)
+        outData[:,0] = sinc_interpolation(data[:,0], s, u, 7).astype(np.int32)
+        outData[:,1] = sinc_interpolation(data[:,1], s, u, 63).astype(np.int32)
     else:
-        interpFunc = fast_sinc_interp
-
-    outData = np.empty((u.shape[0], 2), dtype=np.int32)
-    outData[:,0] = interpFunc(data[:,0], s, u).astype(np.int32)
-    outData[:,1] = interpFunc(data[:,1], s, u).astype(np.int32)
-
-    print(outData.max())
+        outData = np.empty((u.shape[0], 2), dtype=np.int32)
+        outData[:,0] = fast_sinc_interp(data[:,0], s, samplerate, u, 7).astype(np.int32)
+        # outData[:,1] = fast_sinc_interp(data[:,1], samplerate, u, 63).astype(np.int32)
         
-    wavio.write(outFile, outData.astype(np.int32), samplerate, sampwidth=3)
+    wavio.write(outFile, outData[:,0].astype(np.int32), samplerate)
     print("Wrote output data to", outFile)
 
 if __name__ == '__main__':
