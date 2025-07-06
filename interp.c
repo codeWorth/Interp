@@ -212,6 +212,8 @@ int32_t* fastSincInterp(int32_t* data, int sampleRate, int dataCount, float* ups
     int upIndex = 0;
     int32_t* result = _mm_malloc(sizeof(int32_t) * upCount, 32);
 
+    printf("Upsampling %d samples w/ window size = %d...\n", upCount, windowSize);
+
     // loop over all upsamples
     while (upIndex < upCount) {
         int origIndex = upsamples[upIndex] * sampleRate; // gets the nearest orig index to the given time stamp
@@ -231,6 +233,8 @@ int32_t* fastSincInterp(int32_t* data, int sampleRate, int dataCount, float* ups
 
         upIndex++;
     }
+
+    printf("Done upsampling, writing result...\n");
 
     return result;
 }
@@ -320,7 +324,7 @@ int main(int argc, char const *argv[]) {
 
     int upCount;
     float* upsamples = upsampleCurve(params.startSpd, params.endSpd, params.delayTime, params.holdTime, dataChunkCount, header.sampleRate, &upCount);
-    int32_t* upsampledData = fastSincInterp(data, header.sampleRate, dataChunkCount, upsamples, upCount, 4097);
+    int32_t* upsampledData = fastSincInterp(data, header.sampleRate, dataChunkCount, upsamples, upCount, 4095);
     free(upsamples);
 
     WavHeader outHeader = copyHeader(&header, upCount*sizeof(int32_t));
