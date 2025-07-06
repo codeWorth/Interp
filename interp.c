@@ -5,8 +5,8 @@
 #include <stdbool.h>
 #include "string.h"
 #include <assert.h>
-#define _USE_MATH_DEFINES
-#include <math.h>
+#include <time.h>
+#include "fastmath.h"
 
 typedef enum {
     EXEC = 0,
@@ -208,12 +208,14 @@ float* upsampleCurve(float startK, float endK, float startOffset, float endOffse
  */
 int32_t* fastSincInterp(int sampleRate, int32_t* data,int dataCount, float* upsamples, int upCount, int windowSize) {
     assert(windowSize%2 == 1);
+    struct timespec start, finish;
 
     int upIndex = 0;
     int32_t* result = _mm_malloc(sizeof(int32_t) * upCount, 32);
 
     printf("Upsampling %d samples w/ window size = %d...\n", upCount, windowSize);
 
+    clock_gettime(CLOCK_REALTIME, &start);
     // loop over all upsamples
     while (upIndex < upCount) {
         int origIndex = upsamples[upIndex] * sampleRate; // gets the nearest orig index to the given time stamp
@@ -226,13 +228,16 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data,int dataCount, float* upsa
             int origN = origIndex + i - windowSize/2;
 
             float dt = upsamples[upIndex]*sampleRate - origN;
-            double sinc = dt == 0 ? 1 : sin(M_PI * dt) / (M_PI * dt);
+            double sinc = dt == 0 ? 1 : fastSin(M_PI * dt) / (M_PI * dt);
             sum += (double)data[origN] * sinc;
         }
         result[upIndex] = sum;
 
         upIndex++;
     }
+    clock_gettime(CLOCK_REALTIME, &finish);
+
+    printf("Proc took %d seconds and %d milliseconds.\n", (finish.tv_sec - start.tv_sec), (finish.tv_nsec - start.tv_nsec) / 1000000L);
 
     printf("Done upsampling, writing result...\n");
 
@@ -368,6 +373,13 @@ bool writeWavfile(const char* outPath, const WavHeader* inHeader, const int32_t*
 }
 
 int main(int argc, char const *argv[]) {
+    GEN_TRIG_TABLE();
+
+    for (float n = -3.1415; n < 3.1415; n += 0.01) {
+        printf("%f = %f\n", n, sin(n) - fastSin(n));
+    }
+    return 0;
+
     Params params;
     ParseResult result = parseParams(argc, argv, &params);
 

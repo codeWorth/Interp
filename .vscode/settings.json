@@ -5,6 +5,8 @@
         "immintrin.h": "c",
         "stdlib.h": "c",
         "cmath": "c",
-        "math.h": "c"
+        "math.h": "c",
+        "time.h": "c",
+        "pthread_time.h": "c"
     }
 }
