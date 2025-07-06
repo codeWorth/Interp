@@ -206,7 +206,7 @@ float* upsampleCurve(float startK, float endK, float startOffset, float endOffse
  * @param windowSize Size of window around each sample time. Must be odd.
  * @return Array containing the upsampled signal.
  */
-int32_t* fastSincInterp(int32_t* data, int sampleRate, int dataCount, float* upsamples, int upCount, int windowSize) {
+int32_t* fastSincInterp(int sampleRate, int32_t* data,int dataCount, float* upsamples, int upCount, int windowSize) {
     assert(windowSize%2 == 1);
 
     int upIndex = 0;
@@ -239,41 +239,18 @@ int32_t* fastSincInterp(int32_t* data, int sampleRate, int dataCount, float* ups
     return result;
 }
 
-int main(int argc, char const *argv[]) {
-    Params params;
-    ParseResult result = parseParams(argc, argv, &params);
+int getDataChunkCount(const WavHeader* header) {
+    return header->dataChunkSize / (header->bitDepth/8);
+}
 
-    if (result == HELP) {
-        printf("Use the following params:\n\t-i\tin file path\n\t-s\tstart rate\n\t-e\tend rate\n\t-d\tstart delay time\n\t-H\tend hold time\n\tout file path\n");
-        return 0;
-    } else if (result == ERROR) {
-        printf("Some param parse error occured\n");
-        return 1;
-    }
-
-    FILE* inFile;
-    inFile = fopen(params.inFile, "rb");
-    if (inFile == NULL) {
-        printf("Unable to open file at %s\n", params.inFile);
-        return 1;
-    }
-
-    WavHeader header;
-    fread(&header, sizeof(header), 1, inFile);
-
-    if (verifyHeader(&header)) {
-        printf("Verified file header, continuing...\n");
-    } else {
-        return 1;
-    }
-
-    int dataChunkCount = header.dataChunkSize / (header.bitDepth/8);
+int32_t* readWavfile(FILE* inFile, const WavHeader* header) {
     int32_t* data = NULL;
+    int dataChunkCount = getDataChunkCount(header);
 
-    if (header.bitDepth == 32) {
+    if (header->bitDepth == 32) {
         data = _mm_malloc(dataChunkCount * sizeof(int32_t), 32);
         fread(data, sizeof(uint32_t), dataChunkCount, inFile);
-    } else if (header.bitDepth == 24) {
+    } else if (header->bitDepth == 24) {
         data = _mm_malloc(dataChunkCount * sizeof(int32_t), 32);
 
         int valueCount = 0;
@@ -316,22 +293,20 @@ int main(int argc, char const *argv[]) {
 
         printf("Read all %d values...\n", valueCount);
     } else {
-        printf("Bit depth %d not yet supported.\n", header.bitDepth);
-        return 1;
+        printf("Bit depth %d not yet supported.\n", header->bitDepth);
     }
 
-    fclose(inFile);
+    return data;
+}
 
-    int upCount;
-    float* upsamples = upsampleCurve(params.startSpd, params.endSpd, params.delayTime, params.holdTime, dataChunkCount, header.sampleRate, &upCount);
-    int32_t* upsampledData = fastSincInterp(data, header.sampleRate, dataChunkCount, upsamples, upCount, 4095);
-    free(upsamples);
-
-    WavHeader outHeader = copyHeader(&header, upCount*sizeof(int32_t));
+bool writeWavfile(const char* outPath, const WavHeader* inHeader, const int32_t* data, int count) {
+    WavHeader outHeader = copyHeader(inHeader, count*sizeof(int32_t));
     FILE* outFile;
-    outFile = fopen(params.outFile, "rb");
+
+    // Check if file exists and confirm overwrite with user
+    outFile = fopen(outPath, "rb");
     if (outFile != NULL) {
-        printf("File %s already exists! Overwrite (Y/N)?\t", params.outFile);
+        printf("File %s already exists! Overwrite (Y/N)?\t", outPath);
         while (true) {
             char resp[5];
             fgets(resp, sizeof(resp), stdin);
@@ -339,23 +314,24 @@ int main(int argc, char const *argv[]) {
                 break;
             } else if (resp[0] == 'N') {
                 printf("Aborting.\n");
-                return 0;
+                return false;
             } else {
                 printf("Unrecognized response. Overwrite (Y/N)?\t");
             }
         }
     }
-    outFile = fopen(params.outFile, "wb");
+
+    outFile = fopen(outPath, "wb");
 
     fwrite(&outHeader, sizeof(outHeader), 1, outFile);
     if (outHeader.bitDepth == 32) {
-        fwrite(upsampledData, sizeof(uint32_t), upCount, outFile);
+        fwrite(data, sizeof(uint32_t), count, outFile);
     } else if (outHeader.bitDepth == 24) {
         int valueCount = 0;
         uint8_t chunk[32];
 
-        while (valueCount+8 <= upCount) {
-            __m256i buff = _mm256_load_si256((const __m256i*)(upsampledData + valueCount));
+        while (valueCount+8 <= count) {
+            __m256i buff = _mm256_load_si256((const __m256i*)(data + valueCount));
 
             __m256i shuffle = _mm256_setr_epi8(
                 0, 1, 2,
@@ -378,16 +354,61 @@ int main(int argc, char const *argv[]) {
             valueCount += 8;
         }
 
-        int remaining = upCount - valueCount;
+        int remaining = count - valueCount;
         if (remaining > 0) {
             for (int i = 0; i < remaining; i++) {
-                int32_t val = upsampledData[valueCount + i];
+                int32_t val = data[valueCount + i];
                 fwrite(&val, 3, 1, outFile);
             }
         }
     }
 
     fclose(outFile);
+    return true;
+}
+
+int main(int argc, char const *argv[]) {
+    Params params;
+    ParseResult result = parseParams(argc, argv, &params);
+
+    if (result == HELP) {
+        printf("Use the following params:\n\t-i\tin file path\n\t-s\tstart rate\n\t-e\tend rate\n\t-d\tstart delay time\n\t-H\tend hold time\n\tout file path\n");
+        return 0;
+    } else if (result == ERROR) {
+        printf("Some param parse error occured\n");
+        return 1;
+    }
+
+    FILE* inFile;
+    inFile = fopen(params.inFile, "rb");
+    if (inFile == NULL) {
+        printf("Unable to open file at %s\n", params.inFile);
+        return 1;
+    }
+
+    WavHeader header;
+    fread(&header, sizeof(header), 1, inFile);
+
+    if (verifyHeader(&header)) {
+        printf("Verified file header, continuing...\n");
+    } else {
+        return 1;
+    }
+
+    int32_t* data = readWavfile(inFile, &header);
+    if (data == NULL) {
+        return 1;
+    }
+    fclose(inFile);
+
+    int upCount;
+    int origCount = getDataChunkCount(&header);
+    float* upsamples = upsampleCurve(params.startSpd, params.endSpd, params.delayTime, params.holdTime, origCount, header.sampleRate, &upCount);
+    int32_t* upsampledData = fastSincInterp(header.sampleRate, data, origCount, upsamples, upCount, 4095);
+    free(upsamples);
+
+    writeWavfile(params.outFile, &header, upsampledData, upCount);
+
     _mm_free(data);
     _mm_free(upsampledData);
     return 0;
