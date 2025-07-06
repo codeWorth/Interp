@@ -131,8 +131,8 @@ bool verifyHeader(const WavHeader* header) {
  * @brief Generates a sequence of time values in seconds to sample the input data at. 
  * Output sample rate will change linearly from startK*sampleRate to endK*sampleRate.
  * 
- * @param startK Starting ratio between original and upsampled sample rate. No more than 1.
- * @param endK Ending ratio between original and upsampled sample rate. No more than 1.
+ * @param startK Starting ratio between original and upsampled sample rate.
+ * @param endK Ending ratio between original and upsampled sample rate.
  * @param startOffset How long, in seconds, to hold at startK before beginning to increase.
  * @param endOffset How long, in seconds, to hold at endK after reaching it.
  * @param count Number of samples in data.
@@ -141,9 +141,6 @@ bool verifyHeader(const WavHeader* header) {
  * @return Array containing the upsampled time stamps.
  */
 float* upsampleCurve(float startK, float endK, float startOffset, float endOffset, int count, int sampleRate, int* totalUpsamples) {
-    assert(startK <= 1.0f);
-    assert(endK <= 1.0f);
-
     // In the original data, data point N is located at T = N / sampleRate
     // For the beginning section of the upsample, data point N is located at T = N * startK / sampleRate
     // Similar for the ending section of the upscale
@@ -217,7 +214,7 @@ int32_t* fastSincInterp(int32_t* data, int sampleRate, int dataCount, float* ups
 
     // loop over all upsamples
     while (upIndex < upCount) {
-        int origIndex = ceil(upsamples[upIndex] * sampleRate); // gets the nearest orig index to the given time stamp
+        int origIndex = upsamples[upIndex] * sampleRate; // gets the nearest orig index to the given time stamp
 
         int lower = max(0, origIndex - windowSize/2) + windowSize/2 - origIndex;
         int upper = min(dataCount, origIndex + windowSize/2+1) + windowSize/2 - origIndex;
@@ -323,7 +320,7 @@ int main(int argc, char const *argv[]) {
 
     int upCount;
     float* upsamples = upsampleCurve(params.startSpd, params.endSpd, params.delayTime, params.holdTime, dataChunkCount, header.sampleRate, &upCount);
-    int32_t* upsampledData = fastSincInterp(data, header.sampleRate, dataChunkCount, upsamples, upCount, 1023);
+    int32_t* upsampledData = fastSincInterp(data, header.sampleRate, dataChunkCount, upsamples, upCount, 4097);
     free(upsamples);
 
     WavHeader outHeader = copyHeader(&header, upCount*sizeof(int32_t));
