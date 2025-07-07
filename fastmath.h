@@ -1,42 +1,54 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
-#define SINE_TABLE_POWER 9
-#define SINE_TABLE_SIZE 512
+#define SINE_TABLE_POWER 11
+#define SINE_TABLE_SIZE 2048
 
-float sineTable_1q[SINE_TABLE_SIZE];
+double sineTable_2q[SINE_TABLE_SIZE];
 void GEN_TRIG_TABLE() {
     for (int i = 0; i < SINE_TABLE_SIZE; i++) {
-        double x = ((double)i * 0.5 * M_PI) / SINE_TABLE_SIZE;
-        sineTable_1q[i] = sin(x);
+        double x = ((double)i * M_PI) / SINE_TABLE_SIZE;
+        sineTable_2q[i] = sin(x);
     }
 }
 
-// error seems to be on the order of -80db
-inline float fastSin(float x) {
-    int sinIndex = x * 2/M_PI * SINE_TABLE_SIZE; // index will be [0,SINE_TABLE_SIZE) for x in first quadrant
-    float delta = x - sinIndex * (0.5f * M_PI / SINE_TABLE_SIZE); // distance from x to nearest val in table
-    int cosIndex = sinIndex + SINE_TABLE_SIZE; // cosine aka sine derivative is always pi/4 ahead of sine
+// nsin time: 7.922 sec
+// test1:
+//      fsin: 0.813 sec, 512 halfsine table
+//      
+//      fsin error: -132.5db
+// test2:
+//      fsin: 0.822 sec, 256 halfsine table
+//      fsin error: -113.6db
+// test3:
+//      fsin: 0.823, 2048 halfsine table
+//      fsin error: -149.33db
+// test4:
+//      fsin: 0.954, 2048 halfsine table, float
+//      fsin error: -133.38db
+// test5:
+//      fsin: 0.622, 2048 halfsine table, int truc instead of floor
+//      fsin error: -168.61db
+// test6:
+//      fsin: 0.758, 2048 halfsine table, inv w/ math instead of if
+//      fsin error: -168.61db
+// test7: remove extra bit ops, func identical, 0.622 => 0.619
+double fastSin(double x) {
+    int sinIndex = x * (SINE_TABLE_SIZE / M_PI); // index will be [0,SINE_TABLE_SIZE) for x in pos half
+    double delta = x - sinIndex * (M_PI / SINE_TABLE_SIZE); // distance from x to nearest val in table
+    int cosIndex = sinIndex + SINE_TABLE_SIZE/2; // cosine aka sine derivative is always pi/4 ahead of sine
 
-    int negSin = ((sinIndex & (SINE_TABLE_SIZE*2)) >> (SINE_TABLE_POWER+1)) & 1; // 0 when sinIndex in q1,q2, 1 when q3,q4
-    int negCos = ((cosIndex & (SINE_TABLE_SIZE*2)) >> (SINE_TABLE_POWER+1)) & 1;
-
-    int flipSin = ((sinIndex & SINE_TABLE_SIZE) >> SINE_TABLE_POWER) & 1; // 0 when sinIndex in q1,q3, 1 when q2,q4
-    int flipCos = ((cosIndex & SINE_TABLE_SIZE) >> SINE_TABLE_POWER) & 1;
-
-    sinIndex *= -2*flipSin + 1;
-    sinIndex += SINE_TABLE_SIZE * flipSin;
-    cosIndex *= -2*flipCos + 1;
-    cosIndex += SINE_TABLE_SIZE * flipCos;
+    int negSin = sinIndex & SINE_TABLE_SIZE; // 0 when sinIndex in q1,q2, nonzero when q3,q4
+    int negCos = cosIndex & SINE_TABLE_SIZE;
 
     sinIndex &= SINE_TABLE_SIZE-1;
     cosIndex &= SINE_TABLE_SIZE-1;
 
-    float sinVal = sineTable_1q[sinIndex];
-    float cosVal = sineTable_1q[cosIndex];
+    double sinVal = sineTable_2q[sinIndex];
+    double cosVal = sineTable_2q[cosIndex];
 
-    sinVal *= -2*negSin + 1;
-    cosVal *= -2*negCos + 1;
+    if (negSin) sinVal *= -1;
+    if (negCos) cosVal *= -1;
 
     return sinVal + (cosVal - 0.5f*sinVal*delta) * delta;
 }

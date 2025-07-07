@@ -375,11 +375,6 @@ bool writeWavfile(const char* outPath, const WavHeader* inHeader, const int32_t*
 int main(int argc, char const *argv[]) {
     GEN_TRIG_TABLE();
 
-    for (float n = -3.1415; n < 3.1415; n += 0.01) {
-        printf("%f = %f\n", n, sin(n) - fastSin(n));
-    }
-    return 0;
-
     Params params;
     ParseResult result = parseParams(argc, argv, &params);
 

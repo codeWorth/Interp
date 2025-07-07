@@ -11,10 +11,10 @@
             "program": "${fileDirname}/${fileBasenameNoExtension}.exe",
             "args": [
                 "-i", "test.wav",
-                "-s", "0.97",
+                "-s", "0.8",
                 "-e", "1.0",
-                "-d", "0.2",
-                "-H", "0.75",
+                "-d", "0",
+                "-H", "0",
                 "test_out.wav"
             ],
             "stopAtEntry": false,
