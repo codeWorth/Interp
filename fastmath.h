@@ -56,15 +56,15 @@ double fastSinD(double x) {
 
 // Switching to floats somehow causes ~1 second slowdown
 // Hopefully SIMD easily makes up the difference
-__m256 fastSinSIMD(__m256 xs) {
+void fastSinSIMD(__m256* xs, __m256* result) {
     // x * (0.5f * SINE_TABLE_SIZE / M_PI);
     __m256 scale = _mm256_set1_ps(0.5f * SINE_TABLE_SIZE / F_PI);
-    __m256i sinIndex = _mm256_cvtps_epi32(_mm256_mul_ps(xs, scale));
+    __m256i sinIndex = _mm256_cvtps_epi32(_mm256_mul_ps(*xs, scale));
 
     // sinIndex * (-2.f * M_PI / SINE_TABLE_SIZE) + x;
     scale = _mm256_set1_ps(-2.f * F_PI / SINE_TABLE_SIZE);
     __m256 sinIndex_f = _mm256_cvtepi32_ps(sinIndex);
-    __m256 delta =  _mm256_fmadd_ps(scale, sinIndex_f, xs);
+    __m256 delta =  _mm256_fmadd_ps(scale, sinIndex_f, *xs);
 
     // sinIndex + SINE_TABLE_SIZE/4
     __m256i offset = _mm256_set1_epi32(SINE_TABLE_SIZE/4);
@@ -87,8 +87,7 @@ __m256 fastSinSIMD(__m256 xs) {
     inner = _mm256_fmadd_ps(inner, delta, cosVal);
 
     // (cosVal - 0.5f*sinVal*delta) * delta + sinVal;
-    __m256 outer = _mm256_fmadd_ps(inner, delta, sinVal);
-    return outer;
+    *result = _mm256_fmadd_ps(inner, delta, sinVal);
 }
 
 // test 1:
@@ -124,4 +123,21 @@ float chebSin(float x) {
     float p3  = p5*x2  + chebCoeffs[1];
     float p1  = p3*x2  + chebCoeffs[0];
     return (x - pi_major - pi_minor) * (x + pi_major + pi_minor) * p1 * x;
+}
+
+// per https://stackoverflow.com/questions/13219146/how-to-sum-m256-horizontally
+float sum8(__m256* x) {
+    const __m128 hiQuad = _mm256_extractf128_ps(*x, 1);
+    const __m128 loQuad = _mm256_castps256_ps128(*x);
+    const __m128 sumQuad = _mm_add_ps(loQuad, hiQuad);
+
+    const __m128 loDual = sumQuad;
+    const __m128 hiDual = _mm_movehl_ps(sumQuad, sumQuad);
+    const __m128 sumDual = _mm_add_ps(loDual, hiDual);
+
+    const __m128 lo = sumDual;
+    const __m128 hi = _mm_shuffle_ps(sumDual, sumDual, 0x1);
+    const __m128 sum = _mm_add_ss(lo, hi);
+    
+    return _mm_cvtss_f32(sum);
 }

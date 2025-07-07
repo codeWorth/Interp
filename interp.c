@@ -230,21 +230,44 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* ups
     printf("Upsampling %d samples w/ window size = %d...\n", upCount, windowSize);
 
     clock_gettime(CLOCK_REALTIME, &start);
+
+    // prepare some vectors
+    int startN = -paddedWindowSize/2;
+    __m256i inc = _mm256_set_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+    __m256 PI = _mm256_set1_ps(M_PI);
+    __m256 ones = _mm256_set1_ps(1.f);
+    __m256i offset = _mm256_set1_epi32(8);
+
     // loop over all upsamples
     while (upIndex < upCount) {
         int origIndex = upsamples[upIndex] * sampleRate; // gets the nearest orig index to the given time stamp
 
-        double sum = 0;
-        for (int i = 0; i < windowSize; i++) {
-            int origN = origIndex + i - windowSize/2;
+        __m256 upsample = _mm256_set1_ps(upsamples[upIndex]*sampleRate);
+        __m256i origN = _mm256_add_epi32(inc, _mm256_set1_epi32(origIndex - paddedWindowSize/2)); // origN = origIndex - windowSize/2 + i
 
-            double dt = upsamples[upIndex]*sampleRate - origN;
-            double sinc = dt == 0 ? 1 : fastSinD(M_PI * dt) / (M_PI * dt);
-            sum += (double)paddedData[origN + paddedWindowSize/2] * sinc;
+        double sum = 0;
+
+        for (int i = 0; i < paddedWindowSize; i += 8) {
+            // double dt = upsamples[upIndex]*sampleRate - origN;
+            __m256 origN_f = _mm256_cvtepi32_ps(origN);
+            __m256 dt = _mm256_sub_ps(upsample, origN_f);
+
+            __m256 xs = _mm256_mul_ps(PI, dt);      // M_PI * dt
+            __m256 sines; fastSinSIMD(&xs, &sines);         // sin(M_PI * dt)
+            __m256 isZero = _mm256_cmp_ps(xs, _mm256_setzero_ps(), _CMP_EQ_OQ); // dt == 0
+            __m256 divs = _mm256_div_ps(sines, xs); // sin(M_PI * dt) / (M_PI * dt)
+            __m256 sinc = _mm256_blendv_ps(divs, ones, isZero); // dt == 0 ? 1 : result
+
+            // origN will always be 8 adjacent indecies beginning at (origIndex + i)
+            __m256 dataChunk = _mm256_cvtepi32_ps(_mm256_loadu_si256((const __m256i_u*)(paddedData + origIndex + i)));
+            __m256 results = _mm256_mul_ps(dataChunk, sinc); // paddedData[origN] * sinc;
+
+            sum += sum8(&results);
+
+            origN = _mm256_add_epi32(origN, offset);
         }
 
         result[upIndex] = sum;
-
         upIndex++;
     }
     clock_gettime(CLOCK_REALTIME, &finish);
@@ -278,7 +301,7 @@ int32_t* readWavfile(FILE* inFile, const WavHeader* header) {
             fread(chunk, 3, 4, inFile); // read 4 24bit ints to chunk [0, 16)
             fread(chunk + 16, 3, 4, inFile); // read next 4 24bit ints to chunk [16, 32)
             
-            __m256i buff = _mm256_load_si256((const __m256i*)chunk);
+            __m256i buff = _mm256_loadu_si256((const __m256i*)chunk);
             __m256i shuffle = _mm256_setr_epi8(
                 -1, 0, 1, 2,
                 -1, 3, 4, 5,
