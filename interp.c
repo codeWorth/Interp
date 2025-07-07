@@ -227,8 +227,8 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data,int dataCount, float* upsa
         for (int i = lower; i < upper; i++) {
             int origN = origIndex + i - windowSize/2;
 
-            float dt = upsamples[upIndex]*sampleRate - origN;
-            double sinc = dt == 0 ? 1 : fastSin(M_PI * dt) / (M_PI * dt);
+            double dt = upsamples[upIndex]*sampleRate - origN;
+            double sinc = dt == 0 ? 1 : fastSinD(M_PI * dt) / (M_PI * dt);
             sum += (double)data[origN] * sinc;
         }
         result[upIndex] = sum;

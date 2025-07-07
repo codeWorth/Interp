@@ -1,16 +1,20 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
-#define SINE_TABLE_POWER 11
-#define SINE_TABLE_SIZE 2048
+#define SINE_TABLE_POWER 9
+#define SINE_TABLE_SIZE 512
 
 double sineTable_4q[SINE_TABLE_SIZE];
+float f_sineTable_4q[SINE_TABLE_SIZE];
 void GEN_TRIG_TABLE() {
     for (int i = 0; i < SINE_TABLE_SIZE; i++) {
         double x = ((double)i * 2 * M_PI) / SINE_TABLE_SIZE;
         sineTable_4q[i] = sin(x);
+        f_sineTable_4q[i] = sin(x);
     }
 }
+
+const float F_PI = M_PI;
 
 // nsin time: 7.922 sec
 // test1:
@@ -34,9 +38,9 @@ void GEN_TRIG_TABLE() {
 //      fsin error: -168.61db
 // test7: remove extra bit ops, func identical, 0.622 => 0.619
 // test8:
-//      fsin: 600 sec, 2048 fullsine table
+//      fsin: 0.600 sec, 2048 fullsine table
 //      fsin error: -162.37db
-double fastSin(double x) {
+double fastSinD(double x) {
     int sinIndex = x * (0.5f * SINE_TABLE_SIZE / M_PI);
     double delta = x - sinIndex * (2.f * M_PI / SINE_TABLE_SIZE); // distance from x to nearest val in table
     int cosIndex = sinIndex + SINE_TABLE_SIZE/4; // cosine aka sine derivative is always pi/4 ahead of sine
@@ -48,6 +52,43 @@ double fastSin(double x) {
     double cosVal = sineTable_4q[cosIndex];
 
     return sinVal + (cosVal - 0.5f*sinVal*delta) * delta;
+}
+
+// Switching to floats somehow causes ~1 second slowdown
+// Hopefully SIMD easily makes up the difference
+__m256 fastSinSIMD(__m256 xs) {
+    // x * (0.5f * SINE_TABLE_SIZE / M_PI);
+    __m256 scale = _mm256_set1_ps(0.5f * SINE_TABLE_SIZE / F_PI);
+    __m256i sinIndex = _mm256_cvtps_epi32(_mm256_mul_ps(xs, scale));
+
+    // sinIndex * (-2.f * M_PI / SINE_TABLE_SIZE) + x;
+    scale = _mm256_set1_ps(-2.f * F_PI / SINE_TABLE_SIZE);
+    __m256 sinIndex_f = _mm256_cvtepi32_ps(sinIndex);
+    __m256 delta =  _mm256_fmadd_ps(scale, sinIndex_f, xs);
+
+    // sinIndex + SINE_TABLE_SIZE/4
+    __m256i offset = _mm256_set1_epi32(SINE_TABLE_SIZE/4);
+    __m256i cosIndex = _mm256_add_epi32(sinIndex, offset);
+
+    // sinIndex &= SINE_TABLE_SIZE-1;
+    // cosIndex &= SINE_TABLE_SIZE-1;
+    __m256i mask = _mm256_set1_epi32(SINE_TABLE_SIZE-1);
+    sinIndex = _mm256_and_si256(sinIndex, mask);
+    cosIndex = _mm256_and_si256(cosIndex, mask);
+
+    // double sinVal = sineTable_4q[sinIndex];
+    // double cosVal = sineTable_4q[cosIndex];
+    __m256 sinVal = _mm256_i32gather_ps(f_sineTable_4q, sinIndex, sizeof(float));
+    __m256 cosVal = _mm256_i32gather_ps(f_sineTable_4q, cosIndex, sizeof(float));
+
+    // (-0.5f*sinVal*delta + cosVal)
+    scale = _mm256_set1_ps(-0.5f);
+    __m256 inner = _mm256_mul_ps(scale, sinVal);
+    inner = _mm256_fmadd_ps(inner, delta, cosVal);
+
+    // (cosVal - 0.5f*sinVal*delta) * delta + sinVal;
+    __m256 outer = _mm256_fmadd_ps(inner, delta, sinVal);
+    return outer;
 }
 
 // test 1:
