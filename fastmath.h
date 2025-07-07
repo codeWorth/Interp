@@ -4,11 +4,11 @@
 #define SINE_TABLE_POWER 11
 #define SINE_TABLE_SIZE 2048
 
-double sineTable_2q[SINE_TABLE_SIZE];
+double sineTable_4q[SINE_TABLE_SIZE];
 void GEN_TRIG_TABLE() {
     for (int i = 0; i < SINE_TABLE_SIZE; i++) {
-        double x = ((double)i * M_PI) / SINE_TABLE_SIZE;
-        sineTable_2q[i] = sin(x);
+        double x = ((double)i * 2 * M_PI) / SINE_TABLE_SIZE;
+        sineTable_4q[i] = sin(x);
     }
 }
 
@@ -33,22 +33,19 @@ void GEN_TRIG_TABLE() {
 //      fsin: 0.758, 2048 halfsine table, inv w/ math instead of if
 //      fsin error: -168.61db
 // test7: remove extra bit ops, func identical, 0.622 => 0.619
+// test8:
+//      fsin: 600 sec, 2048 fullsine table
+//      fsin error: -162.37db
 double fastSin(double x) {
-    int sinIndex = x * (SINE_TABLE_SIZE / M_PI); // index will be [0,SINE_TABLE_SIZE) for x in pos half
-    double delta = x - sinIndex * (M_PI / SINE_TABLE_SIZE); // distance from x to nearest val in table
-    int cosIndex = sinIndex + SINE_TABLE_SIZE/2; // cosine aka sine derivative is always pi/4 ahead of sine
-
-    int negSin = sinIndex & SINE_TABLE_SIZE; // 0 when sinIndex in q1,q2, nonzero when q3,q4
-    int negCos = cosIndex & SINE_TABLE_SIZE;
+    int sinIndex = x * (0.5f * SINE_TABLE_SIZE / M_PI);
+    double delta = x - sinIndex * (2.f * M_PI / SINE_TABLE_SIZE); // distance from x to nearest val in table
+    int cosIndex = sinIndex + SINE_TABLE_SIZE/4; // cosine aka sine derivative is always pi/4 ahead of sine
 
     sinIndex &= SINE_TABLE_SIZE-1;
     cosIndex &= SINE_TABLE_SIZE-1;
 
-    double sinVal = sineTable_2q[sinIndex];
-    double cosVal = sineTable_2q[cosIndex];
-
-    if (negSin) sinVal *= -1;
-    if (negCos) cosVal *= -1;
+    double sinVal = sineTable_4q[sinIndex];
+    double cosVal = sineTable_4q[cosIndex];
 
     return sinVal + (cosVal - 0.5f*sinVal*delta) * delta;
 }
