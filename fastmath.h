@@ -52,3 +52,38 @@ double fastSin(double x) {
 
     return sinVal + (cosVal - 0.5f*sinVal*delta) * delta;
 }
+
+// test 1:
+//      chebsin: 1.644 sec
+//      error: -133.35db
+// from https://mooooo.ooo/chebyshev-sine-approximation/
+const float chebCoeffs[6] = {
+    -0.10132118f,           // x
+    0.0066208798f,          // x^3
+    -0.00017350505f,        // x^5
+    0.0000025222919f,       // x^7
+    -0.000000023317787f,    // x^9
+    0.00000000013291342f,   // x^11
+};
+float chebSin(float x) {
+    float pi_major = 3.1415927f;
+    float pi_minor = -0.00000008742278f;
+
+    int piCount = x / pi_major;
+    int pi2Count = piCount / 2;
+    if (piCount > 0) {
+        pi2Count += piCount & 1;
+    } else {
+        pi2Count -= piCount & 1;
+    }
+    x += 2*M_PI * -pi2Count;
+
+    float x2 = x*x;
+    float p11 = chebCoeffs[5];
+    float p9  = p11*x2 + chebCoeffs[4];
+    float p7  = p9*x2  + chebCoeffs[3];
+    float p5  = p7*x2  + chebCoeffs[2];
+    float p3  = p5*x2  + chebCoeffs[1];
+    float p1  = p3*x2  + chebCoeffs[0];
+    return (x - pi_major - pi_minor) * (x + pi_major + pi_minor) * p1 * x;
+}
