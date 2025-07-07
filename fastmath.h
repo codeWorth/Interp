@@ -19,7 +19,6 @@ const float F_PI = M_PI;
 // nsin time: 7.922 sec
 // test1:
 //      fsin: 0.813 sec, 512 halfsine table
-//      
 //      fsin error: -132.5db
 // test2:
 //      fsin: 0.822 sec, 256 halfsine table
@@ -56,6 +55,9 @@ double fastSinD(double x) {
 
 // Switching to floats somehow causes ~1 second slowdown
 // Hopefully SIMD easily makes up the difference
+// test 1:
+//      simd: 3.214 sec
+//      error: -87.3db
 void fastSinSIMD(__m256* xs, __m256* result) {
     // x * (0.5f * SINE_TABLE_SIZE / M_PI);
     __m256 scale = _mm256_set1_ps(0.5f * SINE_TABLE_SIZE / F_PI);
