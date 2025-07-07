@@ -231,16 +231,20 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* ups
 
     clock_gettime(CLOCK_REALTIME, &start);
 
+    #ifdef SIMD
     // prepare some vectors
     int startN = -paddedWindowSize/2;
     __m256i inc = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
     __m256 PI = _mm256_set1_ps(M_PI);
     __m256 ones = _mm256_set1_ps(1.f);
     __m256i offset = _mm256_set1_epi32(8);
+    #endif
 
     // loop over all upsamples
     while (upIndex < upCount) {
         int origIndex = upsamples[upIndex] * sampleRate; // gets the nearest orig index to the given time stamp
+
+        #ifdef SIMD
 
         __m256 upsample = _mm256_set1_ps(upsamples[upIndex]*sampleRate);
         __m256i origN = _mm256_add_epi32(inc, _mm256_set1_epi32(origIndex - paddedWindowSize/2)); // origN = origIndex - windowSize/2 + i
@@ -265,6 +269,22 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* ups
             sum += sum8(&results);
             origN = _mm256_add_epi32(origN, offset);
         }
+
+        #else
+
+        double sum = 0;
+
+        for (int i = 0; i < paddedWindowSize; i += 8) {
+            for (int k = 0; k < 8; k++) {
+                int origN = origIndex - paddedWindowSize/2 + i + k;
+                
+                double dt = upsamples[upIndex]*sampleRate - origN;
+                double sinc = dt == 0 ? 1 : fastSinD(M_PI * dt) / (M_PI * dt);
+                sum += (double)paddedData[origIndex + i + k] * sinc;
+            }
+        }
+
+        #endif
 
         result[upIndex] = sum;
         upIndex++;
