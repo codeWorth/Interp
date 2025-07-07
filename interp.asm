@@ -102,6 +102,28 @@ fastSinD:
 	ret
 	.seh_endproc
 	.p2align 4
+	.globl	fastSinF
+	.def	fastSinF;	.scl	2;	.type	32;	.endef
+	.seh_proc	fastSinF
+fastSinF:
+	.seh_endprologue
+	vmulss	.LC7(%rip), %xmm0, %xmm1
+	leaq	f_sineTable_4q(%rip), %rcx
+	vcvttss2sil	%xmm1, %eax
+	vxorps	%xmm1, %xmm1, %xmm1
+	leal	128(%rax), %edx
+	vcvtsi2ssl	%eax, %xmm1, %xmm1
+	andl	$511, %eax
+	vfnmadd132ss	.LC8(%rip), %xmm0, %xmm1
+	vmovss	(%rcx,%rax,4), %xmm2
+	movl	%edx, %eax
+	vmulss	.LC9(%rip), %xmm2, %xmm0
+	andl	$511, %eax
+	vfnmadd213ss	(%rcx,%rax,4), %xmm1, %xmm0
+	vfmadd132ss	%xmm1, %xmm2, %xmm0
+	ret
+	.seh_endproc
+	.p2align 4
 	.globl	fastSinSIMD
 	.def	fastSinSIMD;	.scl	2;	.type	32;	.endef
 	.seh_proc	fastSinSIMD
@@ -112,21 +134,21 @@ fastSinSIMD:
 	.seh_savexmm	%xmm6, 0
 	.seh_endprologue
 	vmovaps	(%rcx), %ymm1
-	vmovdqa	.LC9(%rip), %ymm4
+	vmovdqa	.LC12(%rip), %ymm4
 	leaq	f_sineTable_4q(%rip), %rax
-	vmulps	.LC7(%rip), %ymm1, %ymm0
+	vmulps	.LC10(%rip), %ymm1, %ymm0
 	vcvtps2dq	%ymm0, %ymm0
 	vpand	%ymm4, %ymm0, %ymm5
 	vcvtdq2ps	%ymm0, %ymm2
-	vpaddd	.LC10(%rip), %ymm0, %ymm0
-	vfmadd132ps	.LC8(%rip), %ymm1, %ymm2
+	vpaddd	.LC13(%rip), %ymm0, %ymm0
+	vfmadd132ps	.LC11(%rip), %ymm1, %ymm2
 	vxorps	%xmm1, %xmm1, %xmm1
 	vcmpps	$0, %ymm1, %ymm1, %ymm1
 	vmovaps	%ymm1, %ymm6
 	vgatherdps	%ymm6, (%rax,%ymm5,4), %ymm3
 	vpand	%ymm4, %ymm0, %ymm0
 	vgatherdps	%ymm1, (%rax,%ymm0,4), %ymm4
-	vmulps	.LC11(%rip), %ymm3, %ymm0
+	vmulps	.LC14(%rip), %ymm3, %ymm0
 	vfmadd132ps	%ymm2, %ymm4, %ymm0
 	vfmadd132ps	%ymm2, %ymm3, %ymm0
 	vmovaps	%ymm0, (%rdx)
@@ -141,33 +163,34 @@ fastSinSIMD:
 	.seh_proc	chebSin
 chebSin:
 	.seh_endprologue
-	vmovss	.LC12(%rip), %xmm3
-	vmovss	.LC14(%rip), %xmm2
-	vmovss	.LC20(%rip), %xmm4
+	vmovss	.LC15(%rip), %xmm3
+	vmovss	.LC17(%rip), %xmm2
+	vmovss	.LC23(%rip), %xmm4
 	vdivss	%xmm3, %xmm0, %xmm1
-	vcvttss2sil	%xmm1, %edx
-	movl	%edx, %eax
-	movl	%edx, %ecx
+	vcvttss2sil	%xmm1, %eax
+	movl	%eax, %edx
+	movl	%eax, %ecx
 	vxorps	%xmm1, %xmm1, %xmm1
-	shrl	$31, %eax
-	andl	$1, %ecx
+	shrl	$31, %edx
+	sarl	$31, %ecx
 	vcvtss2sd	%xmm0, %xmm0, %xmm0
-	addl	%edx, %eax
-	sarl	%eax
-	leal	(%rax,%rcx), %r8d
-	subl	%ecx, %eax
-	testl	%edx, %edx
-	cmovg	%r8d, %eax
-	negl	%eax
-	vcvtsi2sdl	%eax, %xmm1, %xmm1
-	vfmadd132sd	.LC13(%rip), %xmm0, %xmm1
+	addl	%eax, %edx
+	andl	$1, %eax
+	xorl	%ecx, %eax
+	sarl	%edx
+	andl	$1, %ecx
+	negl	%edx
+	addl	%ecx, %eax
+	subl	%eax, %edx
+	vcvtsi2sdl	%edx, %xmm1, %xmm1
+	vfmadd132sd	.LC16(%rip), %xmm0, %xmm1
 	vcvtsd2ss	%xmm1, %xmm1, %xmm1
 	vmulss	%xmm1, %xmm1, %xmm0
-	vfmadd213ss	.LC15(%rip), %xmm0, %xmm2
-	vfmadd213ss	.LC16(%rip), %xmm0, %xmm2
-	vfmadd213ss	.LC17(%rip), %xmm0, %xmm2
 	vfmadd213ss	.LC18(%rip), %xmm0, %xmm2
 	vfmadd213ss	.LC19(%rip), %xmm0, %xmm2
+	vfmadd213ss	.LC20(%rip), %xmm0, %xmm2
+	vfmadd213ss	.LC21(%rip), %xmm0, %xmm2
+	vfmadd213ss	.LC22(%rip), %xmm0, %xmm2
 	vsubss	%xmm3, %xmm1, %xmm0
 	vaddss	%xmm3, %xmm1, %xmm3
 	vaddss	%xmm4, %xmm0, %xmm0
@@ -216,9 +239,9 @@ copyHeader:
 	.seh_endproc
 	.section .rdata,"dr"
 	.align 8
-.LC21:
+.LC24:
 	.ascii "Out file should be last param!\0"
-.LC22:
+.LC25:
 	.ascii "Unrecognized param %s\12\0"
 	.text
 	.p2align 4
@@ -244,71 +267,71 @@ parseParams:
 	movq	%rdx, %rdi
 	movq	%r8, %rbp
 	cmpl	$1, %ecx
-	jle	.L33
+	jle	.L32
 	movslq	%ecx, %r13
 	movl	$1, %ebx
 	xorl	%esi, %esi
 	xorl	%edx, %edx
 	leal	-1(%rcx), %r12d
-	jmp	.L32
-	.p2align 4
-	.p2align 3
-.L39:
-	cmpb	$0, 1(%rdx)
-	jne	.L22
-	movq	%rcx, 0(%rbp)
-.L23:
-	incl	%esi
-	xorl	%edx, %edx
-.L19:
-	incq	%rbx
-	cmpq	%rbx, %r13
-	je	.L37
-.L32:
-	movq	(%rdi,%rbx,8), %rcx
-	cmpb	$45, (%rcx)
-	jne	.L35
-	cmpb	$104, 1(%rcx)
-	jne	.L35
-	cmpb	$0, 2(%rcx)
-	je	.L34
-	.p2align 4
-	.p2align 3
-.L35:
-	testq	%rdx, %rdx
-	je	.L38
-	movzbl	(%rdx), %eax
-	cmpl	$105, %eax
-	je	.L39
-.L22:
-	cmpl	$115, %eax
-	jne	.L25
-	cmpb	$0, 1(%rdx)
-	jne	.L25
-	call	atof
-	vcvtsd2ss	%xmm0, %xmm0, %xmm0
-	vmovss	%xmm0, 16(%rbp)
-	jmp	.L23
+	jmp	.L31
 	.p2align 4
 	.p2align 3
 .L38:
+	cmpb	$0, 1(%rdx)
+	jne	.L21
+	movq	%rcx, 0(%rbp)
+.L22:
+	incl	%esi
+	xorl	%edx, %edx
+.L18:
+	incq	%rbx
+	cmpq	%rbx, %r13
+	je	.L36
+.L31:
+	movq	(%rdi,%rbx,8), %rcx
 	cmpb	$45, (%rcx)
-	je	.L40
+	jne	.L34
+	cmpb	$104, 1(%rcx)
+	jne	.L34
+	cmpb	$0, 2(%rcx)
+	je	.L33
+	.p2align 4
+	.p2align 3
+.L34:
+	testq	%rdx, %rdx
+	je	.L37
+	movzbl	(%rdx), %eax
+	cmpl	$105, %eax
+	je	.L38
+.L21:
+	cmpl	$115, %eax
+	jne	.L24
+	cmpb	$0, 1(%rdx)
+	jne	.L24
+	call	atof
+	vcvtsd2ss	%xmm0, %xmm0, %xmm0
+	vmovss	%xmm0, 16(%rbp)
+	jmp	.L22
+	.p2align 4
+	.p2align 3
+.L37:
+	cmpb	$45, (%rcx)
+	je	.L39
 	cmpl	%ebx, %r12d
-	jne	.L41
+	jne	.L40
 	incq	%rbx
 	movq	%rcx, 8(%rbp)
 	incl	%esi
 	cmpq	%rbx, %r13
-	jne	.L32
+	jne	.L31
 	.p2align 4
 	.p2align 3
-.L37:
+.L36:
 	xorl	%eax, %eax
 	cmpl	$6, %esi
 	setne	%al
 	addl	%eax, %eax
-.L13:
+.L12:
 	addq	$40, %rsp
 	popq	%rbx
 	popq	%rsi
@@ -319,53 +342,53 @@ parseParams:
 	ret
 	.p2align 4
 	.p2align 3
-.L25:
+.L24:
 	cmpl	$101, %eax
-	jne	.L27
+	jne	.L26
 	cmpb	$0, 1(%rdx)
-	jne	.L27
+	jne	.L26
 	call	atof
 	vcvtsd2ss	%xmm0, %xmm0, %xmm0
 	vmovss	%xmm0, 20(%rbp)
-	jmp	.L23
+	jmp	.L22
 	.p2align 4
 	.p2align 3
-.L27:
+.L26:
 	cmpl	$100, %eax
-	jne	.L29
+	jne	.L28
 	cmpb	$0, 1(%rdx)
-	jne	.L29
+	jne	.L28
 	call	atof
 	vcvtsd2ss	%xmm0, %xmm0, %xmm0
 	vmovss	%xmm0, 24(%rbp)
-	jmp	.L23
+	jmp	.L22
 	.p2align 4
 	.p2align 3
-.L29:
+.L28:
 	cmpl	$72, %eax
-	je	.L42
-.L31:
-	leaq	.LC22(%rip), %rcx
+	je	.L41
+.L30:
+	leaq	.LC25(%rip), %rcx
 	call	printf
 	movl	$2, %eax
-	jmp	.L13
+	jmp	.L12
 	.p2align 4
 	.p2align 3
-.L40:
+.L39:
 	leaq	1(%rcx), %rdx
-	jmp	.L19
+	jmp	.L18
 	.p2align 4
 	.p2align 3
-.L42:
+.L41:
 	cmpb	$0, 1(%rdx)
-	jne	.L31
+	jne	.L30
 	call	atof
 	vcvtsd2ss	%xmm0, %xmm0, %xmm0
 	vmovss	%xmm0, 28(%rbp)
-	jmp	.L23
+	jmp	.L22
 	.p2align 4
 	.p2align 3
-.L34:
+.L33:
 	movl	$1, %eax
 	addq	$40, %rsp
 	popq	%rbx
@@ -375,38 +398,38 @@ parseParams:
 	popq	%r12
 	popq	%r13
 	ret
-.L41:
-	leaq	.LC21(%rip), %rcx
+.L40:
+	leaq	.LC24(%rip), %rcx
 	call	printf
 	movl	$2, %eax
-	jmp	.L13
-.L33:
+	jmp	.L12
+.L32:
 	movl	$2, %eax
-	jmp	.L13
+	jmp	.L12
 	.seh_endproc
 	.section .rdata,"dr"
-.LC23:
+.LC26:
 	.ascii "RIFF\0"
 	.align 8
-.LC24:
+.LC27:
 	.ascii "Invalid RIFF header tag %.4s.\12\0"
-.LC25:
+.LC28:
 	.ascii "WAVE\0"
 	.align 8
-.LC26:
+.LC29:
 	.ascii "Format %.4s is not .wav, this program only handles wave files currently.\12\0"
-.LC27:
+.LC30:
 	.ascii "fmt \0"
 	.align 8
-.LC28:
+.LC31:
 	.ascii "First chunk %.4s should be format chunk instead.\12\0"
 	.align 8
-.LC29:
+.LC32:
 	.ascii "Chunk size %d should be 16 for PCM.\12\0"
-.LC30:
+.LC33:
 	.ascii "Audio must be uncompressed.\12\0"
 	.align 8
-.LC31:
+.LC34:
 	.ascii "Bit depth %d must be one of 16, 24, or 32.\12\0"
 	.text
 	.p2align 4
@@ -422,37 +445,37 @@ verifyHeader:
 	.seh_stackalloc	40
 	.seh_endprologue
 	movl	$4, %r8d
-	leaq	.LC23(%rip), %rdx
+	leaq	.LC26(%rip), %rdx
 	movq	%rcx, %r12
 	call	strncmp
 	testl	%eax, %eax
-	jne	.L57
+	jne	.L56
 	leaq	8(%r12), %r13
 	movl	$4, %r8d
-	leaq	.LC25(%rip), %rdx
+	leaq	.LC28(%rip), %rdx
 	movq	%r13, %rcx
 	call	strncmp
 	testl	%eax, %eax
-	jne	.L58
+	jne	.L57
 	leaq	12(%r12), %rcx
 	movl	$4, %r8d
-	leaq	.LC27(%rip), %rdx
+	leaq	.LC30(%rip), %rdx
 	call	strncmp
 	testl	%eax, %eax
-	jne	.L59
+	jne	.L58
 	movl	16(%r12), %edx
 	cmpl	$16, %edx
-	jne	.L60
+	jne	.L59
 	cmpw	$1, 20(%r12)
-	jne	.L61
+	jne	.L60
 	movzwl	34(%r12), %edx
 	movl	%edx, %eax
 	andl	$-9, %eax
 	cmpw	$16, %ax
-	je	.L50
+	je	.L49
 	cmpw	$32, %dx
-	jne	.L62
-.L50:
+	jne	.L61
+.L49:
 	movl	$1, %eax
 	addq	$40, %rsp
 	popq	%r12
@@ -460,19 +483,30 @@ verifyHeader:
 	ret
 	.p2align 4
 	.p2align 3
-.L57:
+.L56:
 	movq	%r12, %rdx
-	leaq	.LC24(%rip), %rcx
+	leaq	.LC27(%rip), %rcx
 	call	printf
 	xorl	%eax, %eax
-.L43:
+.L42:
 	addq	$40, %rsp
 	popq	%r12
 	popq	%r13
 	ret
 	.p2align 4
 	.p2align 3
-.L60:
+.L59:
+	leaq	.LC32(%rip), %rcx
+	call	printf
+	xorl	%eax, %eax
+	addq	$40, %rsp
+	popq	%r12
+	popq	%r13
+	ret
+	.p2align 4
+	.p2align 3
+.L57:
+	movq	%r13, %rdx
 	leaq	.LC29(%rip), %rcx
 	call	printf
 	xorl	%eax, %eax
@@ -484,7 +518,7 @@ verifyHeader:
 	.p2align 3
 .L58:
 	movq	%r13, %rdx
-	leaq	.LC26(%rip), %rcx
+	leaq	.LC31(%rip), %rcx
 	call	printf
 	xorl	%eax, %eax
 	addq	$40, %rsp
@@ -493,9 +527,8 @@ verifyHeader:
 	ret
 	.p2align 4
 	.p2align 3
-.L59:
-	movq	%r13, %rdx
-	leaq	.LC28(%rip), %rcx
+.L60:
+	leaq	.LC33(%rip), %rcx
 	call	printf
 	xorl	%eax, %eax
 	addq	$40, %rsp
@@ -505,34 +538,16 @@ verifyHeader:
 	.p2align 4
 	.p2align 3
 .L61:
-	leaq	.LC30(%rip), %rcx
+	leaq	.LC34(%rip), %rcx
 	call	printf
 	xorl	%eax, %eax
-	addq	$40, %rsp
-	popq	%r12
-	popq	%r13
-	ret
-	.p2align 4
-	.p2align 3
-.L62:
-	leaq	.LC31(%rip), %rcx
-	call	printf
-	xorl	%eax, %eax
-	jmp	.L43
+	jmp	.L42
 	.seh_endproc
 	.p2align 4
-	.globl	pad
-	.def	pad;	.scl	2;	.type	32;	.endef
-	.seh_proc	pad
-pad:
-	pushq	%r15
-	.seh_pushreg	%r15
-	pushq	%r14
-	.seh_pushreg	%r14
-	pushq	%r13
-	.seh_pushreg	%r13
-	pushq	%r12
-	.seh_pushreg	%r12
+	.globl	padAndFloat
+	.def	padAndFloat;	.scl	2;	.type	32;	.endef
+	.seh_proc	padAndFloat
+padAndFloat:
 	pushq	%rbp
 	.seh_pushreg	%rbp
 	pushq	%rdi
@@ -541,172 +556,213 @@ pad:
 	.seh_pushreg	%rsi
 	pushq	%rbx
 	.seh_pushreg	%rbx
-	subq	$40, %rsp
-	.seh_stackalloc	40
+	subq	$56, %rsp
+	.seh_stackalloc	56
+	vmovaps	%xmm6, 32(%rsp)
+	.seh_savexmm	%xmm6, 32
 	.seh_endprologue
-	movslq	%edx, %rdi
-	movq	%rcx, %r13
-	movl	%r8d, %ebx
-	movl	%r9d, %esi
-	leal	(%rdi,%r8,2), %ebp
+	movslq	%edx, %rbx
+	movq	%rcx, %rdi
+	movl	%r8d, %esi
+	vmovaps	%xmm3, %xmm6
+	leal	(%rbx,%r8,2), %ebp
 	movslq	%ebp, %rcx
 	salq	$2, %rcx
-	je	.L66
+	je	.L65
 	addq	$32, %rcx
 	call	malloc
 	testq	%rax, %rax
-	je	.L66
-	leaq	32(%rax), %r12
-	andq	$-32, %r12
-	movq	%rax, -8(%r12)
-.L65:
-	movslq	%ebx, %r15
-	leaq	0(,%rdi,4), %r8
-	movq	%r13, %rdx
-	leaq	0(,%r15,4), %r14
-	leaq	(%r12,%r14), %rcx
-	call	memcpy
+	je	.L65
+	leaq	32(%rax), %r9
+	andq	$-32, %r9
+	movq	%rax, -8(%r9)
+.L64:
 	testl	%ebx, %ebx
-	jle	.L63
-	leaq	(%rdi,%r15,2), %rcx
-	leal	-1(%rbp), %r9d
-	movl	%ebx, %r8d
-	salq	$2, %rcx
-	leal	-1(%rbx), %edx
-	movq	%rcx, %rax
-	subq	%r14, %rax
-	cmpq	%rax, %r14
-	setle	%al
-	testq	%rcx, %rcx
-	setle	%r10b
-	orb	%r10b, %al
-	je	.L68
-	cmpl	$2, %edx
-	jbe	.L68
-	cmpl	$6, %edx
-	jbe	.L78
-	shrl	$3, %r8d
-	vmovd	%esi, %xmm0
-	movq	%r12, %rax
-	leaq	-32(%r12,%rcx), %rdx
-	salq	$5, %r8
-	vpbroadcastd	%xmm0, %ymm0
-	addq	%r12, %r8
+	jle	.L72
+	leal	-1(%rbx), %eax
+	cmpl	$6, %eax
+	jbe	.L85
+	movl	%ebx, %edx
+	movslq	%esi, %rax
+	shrl	$3, %edx
+	leaq	(%r9,%rax,4), %rcx
+	xorl	%eax, %eax
+	salq	$5, %rdx
 	.p2align 4
 	.p2align 3
 .L70:
-	vmovdqa	%ymm0, (%rax)
+	vcvtdq2ps	(%rdi,%rax), %ymm0
+	vmovups	%ymm0, (%rcx,%rax)
 	addq	$32, %rax
-	vmovdqu	%ymm0, (%rdx)
-	subq	$32, %rdx
-	cmpq	%r8, %rax
+	cmpq	%rdx, %rax
 	jne	.L70
-	movl	%ebx, %eax
-	andl	$-8, %eax
-	movl	%eax, %edx
-	cmpl	%eax, %ebx
-	je	.L90
-	movl	%ebx, %r8d
-	subl	%eax, %r8d
-	leal	-1(%r8), %r10d
-	cmpl	$2, %r10d
-	jbe	.L92
-	vzeroupper
-.L69:
-	vmovd	%esi, %xmm1
-	addq	%r12, %rcx
-	vpshufd	$0, %xmm1, %xmm0
-	vmovdqa	%xmm0, (%r12,%rax,4)
-	notq	%rax
-	vmovdqu	%xmm0, -12(%rcx,%rax,4)
-	movl	%r8d, %eax
-	andl	$-4, %eax
-	addl	%eax, %edx
-	cmpl	%eax, %r8d
-	je	.L63
-.L74:
-	movl	%r9d, %ecx
-	movslq	%edx, %rax
-	leal	1(%rdx), %r8d
-	subl	%edx, %ecx
-	salq	$2, %rax
-	movslq	%ecx, %rcx
-	movl	%esi, (%r12,%rax)
-	movl	%esi, (%r12,%rcx,4)
-	cmpl	%r8d, %ebx
-	jle	.L63
-	movl	%r9d, %ecx
-	addl	$2, %edx
-	movl	%esi, 4(%r12,%rax)
-	subl	%r8d, %ecx
-	movslq	%ecx, %rcx
-	movl	%esi, (%r12,%rcx,4)
+	movl	%ebx, %edx
+	andl	$-8, %edx
+	movl	%edx, %eax
 	cmpl	%edx, %ebx
-	jle	.L63
-	subl	%edx, %r9d
-	movl	%esi, 8(%r12,%rax)
-	movslq	%r9d, %r9
-	movl	%esi, (%r12,%r9,4)
-.L63:
-	movq	%r12, %rax
-	addq	$40, %rsp
+	je	.L72
+.L69:
+	movl	%ebx, %r8d
+	subl	%edx, %r8d
+	leal	-1(%r8), %ecx
+	cmpl	$2, %ecx
+	jbe	.L74
+	vcvtdq2ps	(%rdi,%rdx,4), %xmm0
+	movslq	%esi, %rcx
+	addq	%rcx, %rdx
+	vmovups	%xmm0, (%r9,%rdx,4)
+	movl	%r8d, %edx
+	andl	$-4, %edx
+	addl	%edx, %eax
+	cmpl	%edx, %r8d
+	je	.L72
+.L74:
+	leal	(%rsi,%rax), %edx
+	movslq	%eax, %r8
+	vxorps	%xmm0, %xmm0, %xmm0
+	movslq	%edx, %rdx
+	vcvtsi2ssl	(%rdi,%r8,4), %xmm0, %xmm1
+	leaq	0(,%r8,4), %rcx
+	vmovss	%xmm1, (%r9,%rdx,4)
+	leal	1(%rax), %edx
+	cmpl	%edx, %ebx
+	jle	.L72
+	addl	%esi, %edx
+	addl	$2, %eax
+	vcvtsi2ssl	4(%rdi,%rcx), %xmm0, %xmm1
+	movslq	%edx, %rdx
+	vmovss	%xmm1, (%r9,%rdx,4)
+	cmpl	%eax, %ebx
+	jle	.L72
+	addl	%esi, %eax
+	vcvtsi2ssl	8(%rdi,%rcx), %xmm0, %xmm0
+	cltq
+	vmovss	%xmm0, (%r9,%rax,4)
+.L72:
+	testl	%esi, %esi
+	jle	.L62
+	movslq	%esi, %rdx
+	subl	%esi, %ebp
+	movl	%esi, %r8d
+	leal	-1(%rsi), %eax
+	addq	%rdx, %rbx
+	leaq	0(,%rbx,4), %rcx
+	leaq	-4(%rcx), %rdx
+	cmpq	$24, %rdx
+	jbe	.L76
+	cmpl	$2, %eax
+	jbe	.L76
+	cmpl	$6, %eax
+	jbe	.L86
+	movl	%esi, %edx
+	vbroadcastss	%xmm6, %ymm0
+	addq	%r9, %rcx
+	xorl	%eax, %eax
+	shrl	$3, %edx
+	salq	$5, %rdx
+	.p2align 4
+	.p2align 3
+.L78:
+	vmovaps	%ymm0, (%r9,%rax)
+	vmovups	%ymm0, (%rcx,%rax)
+	addq	$32, %rax
+	cmpq	%rdx, %rax
+	jne	.L78
+	movl	%esi, %edx
+	andl	$-8, %edx
+	movl	%edx, %eax
+	cmpl	%edx, %esi
+	je	.L62
+	movl	%esi, %r8d
+	subl	%edx, %r8d
+	leal	-1(%r8), %ecx
+	cmpl	$2, %ecx
+	jbe	.L81
+.L77:
+	vshufps	$0, %xmm6, %xmm6, %xmm0
+	addq	%rdx, %rbx
+	vmovaps	%xmm0, (%r9,%rdx,4)
+	movl	%r8d, %edx
+	vmovups	%xmm0, (%r9,%rbx,4)
+	andl	$-4, %edx
+	addl	%edx, %eax
+	cmpl	%edx, %r8d
+	je	.L62
+.L81:
+	movslq	%eax, %rcx
+	leal	0(%rbp,%rax), %edx
+	movslq	%edx, %rdx
+	salq	$2, %rcx
+	vmovss	%xmm6, (%r9,%rcx)
+	vmovss	%xmm6, (%r9,%rdx,4)
+	leal	1(%rax), %edx
+	cmpl	%edx, %esi
+	jle	.L62
+	addl	%ebp, %edx
+	addl	$2, %eax
+	vmovss	%xmm6, 4(%r9,%rcx)
+	movslq	%edx, %rdx
+	vmovss	%xmm6, (%r9,%rdx,4)
+	cmpl	%eax, %esi
+	jle	.L62
+	addl	%ebp, %eax
+	vmovss	%xmm6, 8(%r9,%rcx)
+	cltq
+	vmovss	%xmm6, (%r9,%rax,4)
+.L62:
+	movq	%r9, %rax
+	vzeroupper
+	vmovaps	32(%rsp), %xmm6
+	addq	$56, %rsp
 	popq	%rbx
 	popq	%rsi
 	popq	%rdi
 	popq	%rbp
-	popq	%r12
-	popq	%r13
-	popq	%r14
-	popq	%r15
 	ret
 	.p2align 4
 	.p2align 3
-.L66:
-	xorl	%r12d, %r12d
-	jmp	.L65
-.L92:
-	vzeroupper
-	jmp	.L74
-	.p2align 4
-	.p2align 3
-.L68:
-	movslq	%r9d, %r9
-	movl	%ebx, %ebx
-	movq	%r12, %rax
-	leaq	(%r12,%r9,4), %rdx
-	leaq	(%r12,%rbx,4), %rcx
+.L65:
+	xorl	%r9d, %r9d
+	jmp	.L64
 	.p2align 4
 	.p2align 3
 .L76:
-	movl	%esi, (%rax)
+	movl	%esi, %r8d
+	movq	%r9, %rax
+	movslq	%ebp, %rbp
+	leaq	(%r9,%r8,4), %rdx
+	.p2align 4
+	.p2align 3
+.L83:
+	vmovss	%xmm6, (%rax)
+	vmovss	%xmm6, (%rax,%rbp,4)
 	addq	$4, %rax
-	movl	%esi, (%rdx)
-	subq	$4, %rdx
-	cmpq	%rcx, %rax
-	jne	.L76
-	jmp	.L63
-.L90:
-	vzeroupper
-	jmp	.L63
-.L78:
-	xorl	%eax, %eax
+	cmpq	%rax, %rdx
+	jne	.L83
+	jmp	.L62
+.L85:
 	xorl	%edx, %edx
+	xorl	%eax, %eax
 	jmp	.L69
+.L86:
+	xorl	%edx, %edx
+	xorl	%eax, %eax
+	jmp	.L77
 	.seh_endproc
 	.section .rdata,"dr"
 	.align 8
-.LC32:
+.LC35:
 	.ascii "C:\\Users\\agcum\\Documents\\Code\\Interp\\interp.c\0"
-.LC33:
-	.ascii "curveDuration > 0.f\0"
-.LC34:
-	.ascii "Generated %d upsample times.\12\0"
 .LC36:
-	.ascii "\11Start to mid: %d\0"
+	.ascii "curveDuration > 0.f\0"
 .LC37:
+	.ascii "Generated %d upsample times.\12\0"
+.LC39:
+	.ascii "\11Start to mid: %d\0"
+.LC40:
 	.ascii "\11Mid to end: %d\12\0"
 	.align 8
-.LC38:
+.LC41:
 	.ascii "Durations in samples: %f, %f, %f\12\0"
 	.text
 	.p2align 4
@@ -754,8 +810,8 @@ upsampleCurve:
 	vsubss	%xmm3, %xmm8, %xmm8
 	vcomiss	.LC1(%rip), %xmm8
 	vdivss	%xmm0, %xmm1, %xmm12
-	jbe	.L113
-.L94:
+	jbe	.L119
+.L100:
 	vaddss	%xmm12, %xmm9, %xmm0
 	vaddss	%xmm8, %xmm8, %xmm7
 	vsubss	%xmm9, %xmm12, %xmm13
@@ -776,30 +832,30 @@ upsampleCurve:
 	vroundss	$10, %xmm15, %xmm15, %xmm15
 	movq	%rax, %r12
 	testl	%r8d, %r8d
-	jle	.L114
+	jle	.L120
 	vroundss	$10, %xmm10, %xmm10, %xmm1
 	movslq	%r8d, %rdx
 	xorl	%eax, %eax
 	vcvtss2sd	%xmm15, %xmm15, %xmm15
 	vcvtss2sd	%xmm1, %xmm1, %xmm1
-	jmp	.L103
+	jmp	.L109
 	.p2align 4
 	.p2align 3
-.L115:
+.L121:
 	vmulss	%xmm0, %xmm9, %xmm0
-.L100:
+.L106:
 	vmovss	%xmm0, (%r12,%rax,4)
 	incq	%rax
 	cmpq	%rax, %rdx
-	je	.L104
-.L103:
+	je	.L110
+.L109:
 	vcvtsi2sdl	%eax, %xmm6, %xmm4
 	vcvtsi2ssl	%eax, %xmm6, %xmm0
 	vcomisd	%xmm4, %xmm1
-	ja	.L115
+	ja	.L121
 	vsubss	%xmm10, %xmm0, %xmm0
 	vcomisd	%xmm4, %xmm15
-	jbe	.L112
+	jbe	.L118
 	vmulss	%xmm0, %xmm13, %xmm2
 	vmulss	%xmm0, %xmm9, %xmm3
 	vfmadd132ss	%xmm2, %xmm3, %xmm0
@@ -807,28 +863,28 @@ upsampleCurve:
 	vmovss	%xmm0, (%r12,%rax,4)
 	incq	%rax
 	cmpq	%rax, %rdx
-	jne	.L103
-.L104:
+	jne	.L109
+.L110:
 	movl	%r8d, %edx
-	leaq	.LC34(%rip), %rcx
+	leaq	.LC37(%rip), %rcx
 	call	printf
-	vcomiss	.LC35(%rip), %xmm10
-	jb	.L97
+	vcomiss	.LC38(%rip), %xmm10
+	jb	.L103
 	vroundss	$10, %xmm10, %xmm10, %xmm0
-	leaq	.LC36(%rip), %rcx
+	leaq	.LC39(%rip), %rcx
 	vcvttss2sil	%xmm0, %edx
 	call	printf
-.L97:
+.L103:
 	vcvtsi2sdl	(%rbx), %xmm6, %xmm6
 	vsubsd	%xmm15, %xmm6, %xmm6
 	vcomisd	.LC0(%rip), %xmm6
-	jbe	.L105
-	leaq	.LC37(%rip), %rcx
+	jbe	.L111
+	leaq	.LC40(%rip), %rcx
 	vcvttsd2sil	%xmm6, %edx
 	call	printf
-.L105:
+.L111:
 	vcvtss2sd	%xmm14, %xmm14, %xmm3
-	leaq	.LC38(%rip), %rcx
+	leaq	.LC41(%rip), %rcx
 	vcvtss2sd	%xmm7, %xmm7, %xmm2
 	vcvtss2sd	%xmm10, %xmm10, %xmm1
 	vmovq	%xmm3, %r9
@@ -853,33 +909,36 @@ upsampleCurve:
 	ret
 	.p2align 4
 	.p2align 3
-.L112:
+.L118:
 	vsubss	%xmm7, %xmm0, %xmm0
 	vfmadd132ss	%xmm12, %xmm11, %xmm0
 	vaddss	%xmm8, %xmm0, %xmm0
+	jmp	.L106
+	.p2align 4
+	.p2align 3
+.L119:
+	movl	$171, %r8d
+	leaq	.LC35(%rip), %rdx
+	leaq	.LC36(%rip), %rcx
+	call	*__imp__assert(%rip)
 	jmp	.L100
 	.p2align 4
 	.p2align 3
-.L113:
-	movl	$166, %r8d
-	leaq	.LC32(%rip), %rdx
-	leaq	.LC33(%rip), %rcx
-	call	*__imp__assert(%rip)
-	jmp	.L94
-	.p2align 4
-	.p2align 3
-.L114:
+.L120:
 	vcvtss2sd	%xmm15, %xmm15, %xmm15
-	jmp	.L104
+	jmp	.L110
 	.seh_endproc
 	.section .rdata,"dr"
-.LC40:
+.LC42:
 	.ascii "windowSize%2 == 1\0"
 	.align 8
-.LC43:
+.LC46:
 	.ascii "Upsampling %d samples w/ window size = %d...\12\0"
 	.align 8
-.LC44:
+.LC47:
+	.ascii "Proc took %d seconds and %d milliseconds.\12\0"
+	.align 8
+.LC48:
 	.ascii "Done upsampling, writing result...\12\0"
 	.text
 	.p2align 4
@@ -903,440 +962,205 @@ fastSincInterp:
 	.seh_pushreg	%rsi
 	pushq	%rbx
 	.seh_pushreg	%rbx
-	subq	$216, %rsp
-	.seh_stackalloc	216
-	vmovaps	%xmm6, 48(%rsp)
-	.seh_savexmm	%xmm6, 48
-	vmovaps	%xmm7, 64(%rsp)
-	.seh_savexmm	%xmm7, 64
-	vmovaps	%xmm8, 80(%rsp)
-	.seh_savexmm	%xmm8, 80
-	vmovaps	%xmm9, 96(%rsp)
-	.seh_savexmm	%xmm9, 96
-	vmovaps	%xmm10, 112(%rsp)
-	.seh_savexmm	%xmm10, 112
-	vmovaps	%xmm11, 128(%rsp)
-	.seh_savexmm	%xmm11, 128
-	vmovaps	%xmm12, 144(%rsp)
-	.seh_savexmm	%xmm12, 144
-	vmovaps	%xmm13, 160(%rsp)
-	.seh_savexmm	%xmm13, 160
-	vmovaps	%xmm14, 176(%rsp)
-	.seh_savexmm	%xmm14, 176
-	vmovaps	%xmm15, 192(%rsp)
-	.seh_savexmm	%xmm15, 192
+	subq	$232, %rsp
+	.seh_stackalloc	232
+	vmovaps	%xmm6, 64(%rsp)
+	.seh_savexmm	%xmm6, 64
+	vmovaps	%xmm7, 80(%rsp)
+	.seh_savexmm	%xmm7, 80
+	vmovaps	%xmm8, 96(%rsp)
+	.seh_savexmm	%xmm8, 96
+	vmovaps	%xmm9, 112(%rsp)
+	.seh_savexmm	%xmm9, 112
+	vmovaps	%xmm10, 128(%rsp)
+	.seh_savexmm	%xmm10, 128
+	vmovaps	%xmm11, 144(%rsp)
+	.seh_savexmm	%xmm11, 144
+	vmovaps	%xmm12, 160(%rsp)
+	.seh_savexmm	%xmm12, 160
+	vmovaps	%xmm13, 176(%rsp)
+	.seh_savexmm	%xmm13, 176
+	vmovaps	%xmm14, 192(%rsp)
+	.seh_savexmm	%xmm14, 192
+	vmovaps	%xmm15, 208(%rsp)
+	.seh_savexmm	%xmm15, 208
 	.seh_endprologue
-	movl	328(%rsp), %r12d
-	movq	%rdx, %r14
-	movl	%r12d, %edx
-	movl	%ecx, 288(%rsp)
-	movslq	%r8d, %rbp
+	movl	344(%rsp), %ebp
+	movl	336(%rsp), %r14d
+	movq	%rdx, %r12
+	movl	%ebp, %edx
+	movl	%ecx, 304(%rsp)
+	movl	%r8d, %r15d
 	shrl	$31, %edx
 	movq	%r9, %r13
-	leal	(%r12,%rdx), %eax
+	leal	0(%rbp,%rdx), %eax
 	andl	$1, %eax
 	subl	%edx, %eax
 	cmpl	$1, %eax
-	je	.L117
-	movl	$222, %r8d
-	leaq	.LC32(%rip), %rdx
-	leaq	.LC40(%rip), %rcx
+	je	.L123
+	movl	$227, %r8d
+	leaq	.LC35(%rip), %rdx
+	leaq	.LC42(%rip), %rcx
 	call	*__imp__assert(%rip)
-.L117:
+.L123:
 	vxorps	%xmm6, %xmm6, %xmm6
-	vmovsd	.LC39(%rip), %xmm7
-	vcvtsi2ssl	%r12d, %xmm6, %xmm0
-	vmulss	.LC41(%rip), %xmm0, %xmm0
+	vmovsd	.LC45(%rip), %xmm7
+	movl	%r15d, %edx
+	vxorps	%xmm3, %xmm3, %xmm3
+	vcvtsi2ssl	%ebp, %xmm6, %xmm0
+	vmulss	.LC43(%rip), %xmm0, %xmm0
+	movq	%r12, %rcx
+	movslq	%r14d, %r15
 	vroundss	$10, %xmm0, %xmm0, %xmm0
 	vcvtss2sd	%xmm0, %xmm0, %xmm0
-	vfmadd132sd	.LC42(%rip), %xmm7, %xmm0
-	vcvttsd2sil	%xmm0, %r15d
-	movl	%r15d, %eax
-	shrl	$31, %eax
-	addl	%r15d, %eax
-	movl	%eax, %esi
-	andl	$-2, %eax
-	leal	(%rax,%rbp), %edi
+	vfmadd132sd	.LC44(%rip), %xmm7, %xmm0
+	vcvttsd2sil	%xmm0, %ebx
+	movl	%ebx, %esi
+	shrl	$31, %esi
+	addl	%ebx, %esi
 	sarl	%esi
-	movslq	%edi, %rax
+	movl	%esi, %r8d
+	call	padAndFloat
+	movq	%rax, %rdi
+	movq	%r15, %rax
 	salq	$2, %rax
-	je	.L120
+	je	.L126
 	leaq	32(%rax), %rcx
 	call	malloc
 	testq	%rax, %rax
-	je	.L120
-	leaq	32(%rax), %rbx
-	andq	$-32, %rbx
-	movq	%rax, -8(%rbx)
-.L119:
-	movslq	%esi, %r10
-	leaq	0(,%rbp,4), %r8
-	movq	%r14, %rdx
-	leaq	(%rbx,%r10,4), %rcx
-	movq	%r10, 40(%rsp)
-	call	memcpy
-	cmpl	$1, %r15d
-	movq	40(%rsp), %r10
-	jle	.L128
-	leaq	0(%rbp,%r10,2), %rcx
-	movl	%esi, %eax
-	decl	%edi
-	salq	$2, %rcx
-	salq	$2, %rax
-	movq	%rcx, %rdx
-	subq	%rax, %rdx
-	cmpq	%rax, %rdx
-	setge	%al
-	testq	%rcx, %rcx
-	setle	%dl
-	orb	%dl, %al
-	je	.L124
-	cmpl	$7, %r15d
-	jle	.L124
-	cmpl	$15, %r15d
-	jle	.L160
-	movl	%esi, %r8d
-	leaq	-32(%rbx,%rcx), %rax
-	movq	%rbx, %rdx
-	vpxor	%xmm0, %xmm0, %xmm0
-	shrl	$3, %r8d
-	movq	%rax, %r10
-	decl	%r8d
-	salq	$5, %r8
-	subq	%r8, %r10
-	leaq	-32(%r10), %r8
-.L126:
-	vmovdqa	%ymm0, (%rdx)
-	subq	$32, %rax
-	vmovdqu	%ymm0, 32(%rax)
-	addq	$32, %rdx
-	cmpq	%rax, %r8
-	jne	.L126
-	movl	%esi, %edx
-	andl	$-8, %edx
-	movl	%edx, %eax
-	cmpl	%esi, %edx
-	je	.L200
-	vzeroupper
+	je	.L126
+	leaq	32(%rax), %r12
+	andq	$-32, %r12
+	movq	%rax, -8(%r12)
 .L125:
-	movl	%esi, %r8d
-	subl	%edx, %r8d
-	leal	-1(%r8), %r10d
-	cmpl	$2, %r10d
-	jbe	.L130
-	vpxor	%xmm0, %xmm0, %xmm0
-	addq	%rbx, %rcx
-	vmovdqa	%xmm0, (%rbx,%rdx,4)
-	notq	%rdx
-	vmovdqu	%xmm0, -12(%rcx,%rdx,4)
-	movl	%r8d, %edx
-	andl	$-4, %edx
-	addl	%edx, %eax
-	cmpl	%r8d, %edx
-	je	.L128
-.L130:
-	movl	%edi, %ecx
-	movslq	%eax, %rdx
-	leal	1(%rax), %r8d
-	subl	%eax, %ecx
-	salq	$2, %rdx
-	movslq	%ecx, %rcx
-	movl	$0, (%rbx,%rdx)
-	movl	$0, (%rbx,%rcx,4)
-	cmpl	%r8d, %esi
-	jle	.L128
-	movl	%edi, %ecx
-	addl	$2, %eax
-	movl	$0, 4(%rbx,%rdx)
-	subl	%r8d, %ecx
-	movslq	%ecx, %rcx
-	movl	$0, (%rbx,%rcx,4)
-	cmpl	%eax, %esi
-	jle	.L128
-	subl	%eax, %edi
-	movl	$0, 8(%rbx,%rdx)
-	movslq	%edi, %rax
-	movl	$0, (%rbx,%rax,4)
-.L128:
-	movslq	320(%rsp), %rdi
-	movq	%rdi, %rcx
-	salq	$2, %rcx
-	je	.L122
-	addq	$32, %rcx
-	call	malloc
-	testq	%rax, %rax
-	je	.L122
-	leaq	32(%rax), %r14
-	andq	$-32, %r14
-	movq	%rax, -8(%r14)
-.L134:
-	movl	320(%rsp), %edx
-	movl	%r12d, %r8d
-	leaq	.LC43(%rip), %rcx
-	call	printf
-	movl	320(%rsp), %eax
-	testl	%eax, %eax
-	jle	.L159
-	vmovsd	.LC2(%rip), %xmm8
-	leal	-1(%r15), %r11d
-	xorl	%r10d, %r10d
-	vxorpd	%xmm11, %xmm11, %xmm11
-	andl	$-8, %r11d
-	leaq	sineTable_4q(%rip), %rcx
-	vcvtsi2ssl	288(%rsp), %xmm6, %xmm10
-	addl	$8, %r11d
-	.p2align 4
-	.p2align 3
-.L158:
-	vmulss	0(%r13,%r10,4), %xmm10, %xmm1
-	vcvttss2sil	%xmm1, %edx
-	testl	%r15d, %r15d
-	jle	.L161
-	vmovsd	.LC2(%rip), %xmm9
-	vmovsd	.LC4(%rip), %xmm5
-	movl	%edx, %eax
-	movslq	%edx, %rdx
-	vmovsd	.LC5(%rip), %xmm4
-	vmovsd	.LC6(%rip), %xmm3
-	subl	%esi, %eax
-	leaq	(%rbx,%rdx,4), %rdx
-	leal	(%r11,%rax), %r9d
-	vxorps	%xmm2, %xmm2, %xmm2
-	vmovsd	%xmm11, %xmm11, %xmm0
-	.p2align 4
-	.p2align 3
-.L157:
-	vcvtsi2ssl	%eax, %xmm6, %xmm12
-	vsubss	%xmm12, %xmm1, %xmm12
-	vucomiss	%xmm2, %xmm12
-	jp	.L169
-	vmovsd	%xmm7, %xmm7, %xmm13
-	je	.L139
-.L169:
-	vcvtss2sd	%xmm12, %xmm12, %xmm12
-	vmulsd	%xmm9, %xmm12, %xmm12
-	vmulsd	%xmm5, %xmm12, %xmm13
-	vcvttsd2sil	%xmm13, %r8d
-	leal	128(%r8), %ebp
-	vcvtsi2sdl	%r8d, %xmm6, %xmm13
-	andl	$511, %r8d
-	vmovsd	(%rcx,%r8,8), %xmm15
-	andl	$511, %ebp
-	vfnmadd132sd	%xmm4, %xmm12, %xmm13
-	vmulsd	%xmm3, %xmm15, %xmm14
-	vfnmadd213sd	(%rcx,%rbp,8), %xmm13, %xmm14
-	vfmadd132sd	%xmm14, %xmm15, %xmm13
-	vdivsd	%xmm12, %xmm13, %xmm13
-.L139:
-	leal	1(%rax), %r8d
-	vcvtsi2sdl	(%rdx), %xmm6, %xmm12
-	vfmadd231sd	%xmm12, %xmm13, %xmm0
-	vcvtsi2ssl	%r8d, %xmm6, %xmm12
-	vsubss	%xmm12, %xmm1, %xmm12
-	vucomiss	%xmm2, %xmm12
-	jp	.L170
-	vmovsd	%xmm7, %xmm7, %xmm13
-	je	.L141
-.L170:
-	vcvtss2sd	%xmm12, %xmm12, %xmm12
-	vmulsd	%xmm8, %xmm12, %xmm12
-	vmulsd	%xmm5, %xmm12, %xmm13
-	vcvttsd2sil	%xmm13, %r8d
-	leal	128(%r8), %ebp
-	vcvtsi2sdl	%r8d, %xmm6, %xmm13
-	andl	$511, %r8d
-	vmovsd	(%rcx,%r8,8), %xmm15
-	andl	$511, %ebp
-	vfnmadd132sd	%xmm4, %xmm12, %xmm13
-	vmulsd	%xmm3, %xmm15, %xmm14
-	vfnmadd213sd	(%rcx,%rbp,8), %xmm13, %xmm14
-	vfmadd132sd	%xmm14, %xmm15, %xmm13
-	vdivsd	%xmm12, %xmm13, %xmm13
-.L141:
-	leal	2(%rax), %r8d
-	vcvtsi2sdl	4(%rdx), %xmm6, %xmm12
-	vfmadd132sd	%xmm12, %xmm0, %xmm13
-	vcvtsi2ssl	%r8d, %xmm6, %xmm0
-	vsubss	%xmm0, %xmm1, %xmm0
-	vucomiss	%xmm2, %xmm0
-	jp	.L171
-	vmovsd	%xmm7, %xmm7, %xmm12
-	je	.L143
-.L171:
-	vcvtss2sd	%xmm0, %xmm0, %xmm0
-	vmulsd	%xmm8, %xmm0, %xmm0
-	vmulsd	.LC4(%rip), %xmm0, %xmm12
-	vcvttsd2sil	%xmm12, %r8d
-	leal	128(%r8), %ebp
-	vcvtsi2sdl	%r8d, %xmm6, %xmm12
-	andl	$511, %r8d
-	vfnmadd132sd	.LC5(%rip), %xmm0, %xmm12
-	vmovsd	(%rcx,%r8,8), %xmm15
-	andl	$511, %ebp
-	vmulsd	.LC6(%rip), %xmm15, %xmm14
-	vfnmadd213sd	(%rcx,%rbp,8), %xmm12, %xmm14
-	vfmadd132sd	%xmm14, %xmm15, %xmm12
-	vdivsd	%xmm0, %xmm12, %xmm12
-.L143:
-	leal	3(%rax), %r8d
-	vcvtsi2sdl	8(%rdx), %xmm6, %xmm0
-	vfmadd132sd	%xmm0, %xmm13, %xmm12
-	vcvtsi2ssl	%r8d, %xmm6, %xmm0
-	vsubss	%xmm0, %xmm1, %xmm0
-	vucomiss	%xmm2, %xmm0
-	jp	.L172
-	vmovsd	%xmm7, %xmm7, %xmm13
-	je	.L145
-.L172:
-	vcvtss2sd	%xmm0, %xmm0, %xmm0
-	vmulsd	.LC2(%rip), %xmm0, %xmm0
-	vmulsd	.LC4(%rip), %xmm0, %xmm13
-	vcvttsd2sil	%xmm13, %r8d
-	leal	128(%r8), %ebp
-	vcvtsi2sdl	%r8d, %xmm6, %xmm13
-	andl	$511, %r8d
-	vfnmadd132sd	.LC5(%rip), %xmm0, %xmm13
-	vmovsd	(%rcx,%r8,8), %xmm15
-	andl	$511, %ebp
-	vmulsd	.LC6(%rip), %xmm15, %xmm14
-	vfnmadd213sd	(%rcx,%rbp,8), %xmm13, %xmm14
-	vfmadd132sd	%xmm14, %xmm15, %xmm13
-	vdivsd	%xmm0, %xmm13, %xmm13
-.L145:
-	leal	4(%rax), %r8d
-	vcvtsi2sdl	12(%rdx), %xmm6, %xmm0
-	vfmadd132sd	%xmm0, %xmm12, %xmm13
-	vcvtsi2ssl	%r8d, %xmm6, %xmm0
-	vsubss	%xmm0, %xmm1, %xmm0
-	vucomiss	%xmm2, %xmm0
-	jp	.L173
-	vmovsd	%xmm7, %xmm7, %xmm12
-	je	.L147
-.L173:
-	vcvtss2sd	%xmm0, %xmm0, %xmm0
-	vmulsd	.LC2(%rip), %xmm0, %xmm0
-	vmulsd	.LC4(%rip), %xmm0, %xmm12
-	vcvttsd2sil	%xmm12, %r8d
-	leal	128(%r8), %ebp
-	vcvtsi2sdl	%r8d, %xmm6, %xmm12
-	andl	$511, %r8d
-	vfnmadd132sd	.LC5(%rip), %xmm0, %xmm12
-	vmovsd	(%rcx,%r8,8), %xmm15
-	andl	$511, %ebp
-	vmulsd	.LC6(%rip), %xmm15, %xmm14
-	vfnmadd213sd	(%rcx,%rbp,8), %xmm12, %xmm14
-	vfmadd132sd	%xmm14, %xmm15, %xmm12
-	vdivsd	%xmm0, %xmm12, %xmm12
-.L147:
-	leal	5(%rax), %r8d
-	vcvtsi2sdl	16(%rdx), %xmm6, %xmm0
-	vfmadd132sd	%xmm0, %xmm13, %xmm12
-	vcvtsi2ssl	%r8d, %xmm6, %xmm0
-	vsubss	%xmm0, %xmm1, %xmm0
-	vucomiss	%xmm2, %xmm0
-	jp	.L174
-	vmovsd	%xmm7, %xmm7, %xmm14
-	je	.L149
-.L174:
-	vcvtss2sd	%xmm0, %xmm0, %xmm0
-	vmulsd	.LC2(%rip), %xmm0, %xmm0
-	vmulsd	.LC4(%rip), %xmm0, %xmm13
-	vcvttsd2sil	%xmm13, %r8d
-	vcvtsi2sdl	%r8d, %xmm6, %xmm13
-	leal	128(%r8), %ebp
-	vmovsd	%xmm13, %xmm13, %xmm14
-	andl	$511, %r8d
-	vfnmadd132sd	.LC5(%rip), %xmm0, %xmm14
-	andl	$511, %ebp
-	vmovsd	(%rcx,%r8,8), %xmm15
-	vmulsd	.LC6(%rip), %xmm15, %xmm13
-	vfnmadd213sd	(%rcx,%rbp,8), %xmm14, %xmm13
-	vfmadd132sd	%xmm13, %xmm15, %xmm14
-	vdivsd	%xmm0, %xmm14, %xmm14
-.L149:
-	leal	6(%rax), %r8d
-	vcvtsi2sdl	20(%rdx), %xmm6, %xmm0
-	vfmadd132sd	%xmm0, %xmm12, %xmm14
-	vcvtsi2ssl	%r8d, %xmm6, %xmm0
-	vsubss	%xmm0, %xmm1, %xmm0
-	vucomiss	%xmm2, %xmm0
-	jp	.L175
-	vmovsd	%xmm7, %xmm7, %xmm12
-	je	.L151
-.L175:
-	vcvtss2sd	%xmm0, %xmm0, %xmm0
-	vmulsd	.LC2(%rip), %xmm0, %xmm0
-	vmulsd	.LC4(%rip), %xmm0, %xmm12
-	vcvttsd2sil	%xmm12, %r8d
-	leal	128(%r8), %ebp
-	vcvtsi2sdl	%r8d, %xmm6, %xmm12
-	andl	$511, %r8d
-	vfnmadd132sd	.LC5(%rip), %xmm0, %xmm12
-	vmovsd	(%rcx,%r8,8), %xmm15
-	andl	$511, %ebp
-	vmulsd	.LC6(%rip), %xmm15, %xmm13
-	vfnmadd213sd	(%rcx,%rbp,8), %xmm12, %xmm13
-	vfmadd132sd	%xmm13, %xmm15, %xmm12
-	vdivsd	%xmm0, %xmm12, %xmm12
-.L151:
-	leal	7(%rax), %r8d
-	vcvtsi2sdl	24(%rdx), %xmm6, %xmm0
-	vfmadd132sd	%xmm0, %xmm14, %xmm12
-	vcvtsi2ssl	%r8d, %xmm6, %xmm0
-	vsubss	%xmm0, %xmm1, %xmm0
-	vucomiss	%xmm2, %xmm0
-	jp	.L176
-	je	.L153
-.L176:
-	addl	$8, %eax
-	addq	$32, %rdx
-	vcvtss2sd	%xmm0, %xmm0, %xmm0
-	vmulsd	.LC2(%rip), %xmm0, %xmm0
-	vmulsd	.LC4(%rip), %xmm0, %xmm13
-	vcvttsd2sil	%xmm13, %r8d
-	leal	128(%r8), %ebp
-	vcvtsi2sdl	%r8d, %xmm6, %xmm13
-	andl	$511, %r8d
-	vfnmadd132sd	.LC5(%rip), %xmm0, %xmm13
-	vmovsd	(%rcx,%r8,8), %xmm15
+	movl	%r14d, %edx
+	leaq	.LC46(%rip), %rcx
 	movl	%ebp, %r8d
-	vmulsd	.LC6(%rip), %xmm15, %xmm14
-	andl	$511, %r8d
-	vfnmadd213sd	(%rcx,%r8,8), %xmm13, %xmm14
-	vfmadd132sd	%xmm14, %xmm15, %xmm13
-	vdivsd	%xmm0, %xmm13, %xmm0
-	vcvtsi2sdl	-4(%rdx), %xmm6, %xmm13
-	vfmadd132sd	%xmm13, %xmm12, %xmm0
-	cmpl	%eax, %r9d
-	jne	.L157
-.L156:
-	vcvttsd2sil	%xmm0, %eax
-.L138:
-	movl	%eax, (%r14,%r10,4)
-	incq	%r10
-	cmpq	%rdi, %r10
-	jne	.L158
-.L159:
-	testq	%rbx, %rbx
-	je	.L137
-	movq	-8(%rbx), %rcx
-	call	free
+	call	printf
+	xorl	%ecx, %ecx
+	leaq	32(%rsp), %rdx
+	call	clock_gettime
+	testl	%r14d, %r14d
+	jle	.L137
+	vmovsd	.LC2(%rip), %xmm15
+	vmovss	.LC15(%rip), %xmm4
+	vcvtsi2ssl	304(%rsp), %xmm6, %xmm0
+	xorl	%r11d, %r11d
+	vmovsd	.LC16(%rip), %xmm14
+	vmovss	.LC17(%rip), %xmm13
+	vmovd	%xmm0, %ebp
+	vmovss	.LC18(%rip), %xmm12
+	.p2align 4
+	.p2align 3
+.L136:
+	vmovd	%ebp, %xmm5
+	vmulss	0(%r13,%r11,4), %xmm5, %xmm8
+	vcvttss2sil	%xmm8, %eax
+	testl	%ebx, %ebx
+	jle	.L138
+	vmovss	.LC23(%rip), %xmm5
+	movl	%eax, %ecx
+	cltq
+	vxorpd	%xmm3, %xmm3, %xmm3
+	subl	%esi, %ecx
+	leaq	(%rdi,%rax,4), %r8
+	vxorps	%xmm7, %xmm7, %xmm7
+	leal	(%rbx,%rcx), %r9d
+	.p2align 4
+	.p2align 3
+.L135:
+	vcvtsi2ssl	%ecx, %xmm6, %xmm0
+	vsubss	%xmm0, %xmm8, %xmm0
+	vucomiss	%xmm7, %xmm0
+	jp	.L139
+	je	.L131
+.L139:
+	vcvtss2sd	%xmm0, %xmm0, %xmm0
+	vmovss	.LC22(%rip), %xmm10
+	incl	%ecx
+	addq	$4, %r8
+	vmulsd	%xmm15, %xmm0, %xmm0
+	vcvtsd2ss	%xmm0, %xmm0, %xmm2
+	vdivss	%xmm4, %xmm2, %xmm1
+	vcvttss2sil	%xmm1, %edx
+	movl	%edx, %eax
+	movl	%edx, %r10d
+	vcvtss2sd	%xmm2, %xmm2, %xmm2
+	shrl	$31, %eax
+	sarl	$31, %r10d
+	addl	%edx, %eax
+	andl	$1, %edx
+	xorl	%r10d, %edx
+	sarl	%eax
+	andl	$1, %r10d
+	negl	%eax
+	addl	%edx, %r10d
+	subl	%r10d, %eax
+	vcvtsi2sdl	%eax, %xmm6, %xmm1
+	vfmadd132sd	%xmm14, %xmm2, %xmm1
+	vcvtsd2ss	%xmm1, %xmm1, %xmm1
+	vmulss	%xmm1, %xmm1, %xmm2
+	vaddss	%xmm4, %xmm1, %xmm11
+	vmovaps	%xmm2, %xmm9
+	vsubss	%xmm5, %xmm11, %xmm11
+	vfmadd132ss	%xmm13, %xmm12, %xmm9
+	vfmadd213ss	.LC19(%rip), %xmm2, %xmm9
+	vfmadd213ss	.LC20(%rip), %xmm2, %xmm9
+	vfmadd213ss	.LC21(%rip), %xmm2, %xmm9
+	vfmadd231ss	%xmm9, %xmm2, %xmm10
+	vsubss	%xmm4, %xmm1, %xmm9
+	vcvtss2sd	-4(%r8), %xmm6, %xmm2
+	vaddss	%xmm5, %xmm9, %xmm9
+	vmulss	%xmm11, %xmm9, %xmm9
+	vmulss	%xmm10, %xmm9, %xmm9
+	vmulss	%xmm1, %xmm9, %xmm1
+	vcvtss2sd	%xmm1, %xmm1, %xmm1
+	vdivsd	%xmm0, %xmm1, %xmm1
+	vfmadd231sd	%xmm1, %xmm2, %xmm3
+	cmpl	%r9d, %ecx
+	jne	.L135
+.L134:
+	vcvttsd2sil	%xmm3, %eax
+.L130:
+	movl	%eax, (%r12,%r11,4)
+	incq	%r11
+	cmpq	%r11, %r15
+	jne	.L136
 .L137:
-	leaq	.LC44(%rip), %rcx
+	xorl	%ecx, %ecx
+	leaq	48(%rsp), %rdx
+	call	clock_gettime
+	testq	%rdi, %rdi
+	je	.L129
+	movq	-8(%rdi), %rcx
+	call	free
+.L129:
+	movl	56(%rsp), %eax
+	subl	40(%rsp), %eax
+	leaq	.LC47(%rip), %rcx
+	movq	48(%rsp), %rdx
+	subq	32(%rsp), %rdx
+	movslq	%eax, %r8
+	sarl	$31, %eax
+	imulq	$1125899907, %r8, %r8
+	sarq	$50, %r8
+	subl	%eax, %r8d
+	call	printf
+	leaq	.LC48(%rip), %rcx
 	call	printf
 	nop
-	vmovaps	48(%rsp), %xmm6
-	movq	%r14, %rax
-	vmovaps	64(%rsp), %xmm7
-	vmovaps	80(%rsp), %xmm8
-	vmovaps	96(%rsp), %xmm9
-	vmovaps	112(%rsp), %xmm10
-	vmovaps	128(%rsp), %xmm11
-	vmovaps	144(%rsp), %xmm12
-	vmovaps	160(%rsp), %xmm13
-	vmovaps	176(%rsp), %xmm14
-	vmovaps	192(%rsp), %xmm15
-	addq	$216, %rsp
+	vmovaps	64(%rsp), %xmm6
+	movq	%r12, %rax
+	vmovaps	80(%rsp), %xmm7
+	vmovaps	96(%rsp), %xmm8
+	vmovaps	112(%rsp), %xmm9
+	vmovaps	128(%rsp), %xmm10
+	vmovaps	144(%rsp), %xmm11
+	vmovaps	160(%rsp), %xmm12
+	vmovaps	176(%rsp), %xmm13
+	vmovaps	192(%rsp), %xmm14
+	vmovaps	208(%rsp), %xmm15
+	addq	$232, %rsp
 	popq	%rbx
 	popq	%rsi
 	popq	%rdi
@@ -1348,42 +1172,22 @@ fastSincInterp:
 	ret
 	.p2align 4
 	.p2align 3
-.L153:
-	addl	$8, %eax
-	vcvtsi2sdl	28(%rdx), %xmm6, %xmm0
-	addq	$32, %rdx
-	vaddsd	%xmm12, %xmm0, %xmm0
-	cmpl	%eax, %r9d
-	jne	.L157
-	jmp	.L156
-.L161:
-	xorl	%eax, %eax
-	jmp	.L138
-.L122:
-	xorl	%r14d, %r14d
+.L131:
+	vcvtss2sd	(%r8), %xmm6, %xmm0
+	incl	%ecx
+	addq	$4, %r8
+	vaddsd	%xmm0, %xmm3, %xmm3
+	cmpl	%ecx, %r9d
+	jne	.L135
 	jmp	.L134
-.L120:
-	xorl	%ebx, %ebx
-	jmp	.L119
-.L124:
-	movslq	%edi, %rdi
+	.p2align 4
+	.p2align 3
+.L138:
 	xorl	%eax, %eax
-	leaq	(%rbx,%rdi,4), %rdx
-.L132:
-	movl	$0, (%rbx,%rax,4)
-	incq	%rax
-	movl	$0, (%rdx)
-	subq	$4, %rdx
-	cmpl	%eax, %esi
-	jg	.L132
-	jmp	.L128
-.L160:
-	xorl	%edx, %edx
-	xorl	%eax, %eax
+	jmp	.L130
+.L126:
+	xorl	%r12d, %r12d
 	jmp	.L125
-.L200:
-	vzeroupper
-	jmp	.L128
 	.seh_endproc
 	.p2align 4
 	.globl	getDataChunkCount
@@ -1400,10 +1204,10 @@ getDataChunkCount:
 	ret
 	.seh_endproc
 	.section .rdata,"dr"
-.LC46:
+.LC50:
 	.ascii "Read all %d values...\12\0"
 	.align 8
-.LC47:
+.LC51:
 	.ascii "Bit depth %d not yet supported.\12\0"
 	.text
 	.p2align 4
@@ -1441,22 +1245,22 @@ readWavfile:
 	movslq	%eax, %rdi
 	movl	%edi, %ebx
 	cmpw	$32, %r8w
-	je	.L234
+	je	.L180
 	cmpw	$24, %r8w
-	jne	.L208
+	jne	.L154
 	movslq	%edi, %rcx
 	salq	$2, %rcx
-	je	.L211
+	je	.L157
 	addq	$32, %rcx
 	call	malloc
 	testq	%rax, %rax
-	je	.L211
+	je	.L157
 	leaq	32(%rax), %r13
 	andq	$-32, %r13
 	movq	%rax, -8(%r13)
-.L210:
+.L156:
 	cmpl	$7, %edi
-	jle	.L216
+	jle	.L162
 	leal	-8(%rdi), %r12d
 	movq	%r13, %rbx
 	leaq	32(%rsp), %r15
@@ -1466,12 +1270,12 @@ readWavfile:
 	movq	%rbp, %r12
 	salq	$5, %rbp
 	addq	%r13, %rbp
-	jmp	.L213
+	jmp	.L159
 	.p2align 4
 	.p2align 3
-.L233:
+.L179:
 	vzeroupper
-.L213:
+.L159:
 	movq	%rsi, %r9
 	movl	$4, %r8d
 	movl	$3, %edx
@@ -1484,23 +1288,23 @@ readWavfile:
 	addq	$32, %rbx
 	call	fread
 	vmovdqu	32(%rsp), %ymm1
-	vpshufb	.LC45(%rip), %ymm1, %ymm0
+	vpshufb	.LC49(%rip), %ymm1, %ymm0
 	vpsrad	$8, %ymm0, %ymm0
 	vmovdqa	%ymm0, -32(%rbx)
 	cmpq	%rbp, %rbx
-	jne	.L233
+	jne	.L179
 	sall	$3, %r12d
 	subl	%r12d, %edi
 	movl	%edi, %ebx
 	vzeroupper
-.L212:
+.L158:
 	testl	%ebx, %ebx
-	jg	.L235
-.L214:
+	jg	.L181
+.L160:
 	movl	%r12d, %edx
-	leaq	.LC46(%rip), %rcx
+	leaq	.LC50(%rip), %rcx
 	call	printf
-.L202:
+.L148:
 	movq	%r13, %rax
 	addq	$72, %rsp
 	popq	%rbx
@@ -1514,40 +1318,40 @@ readWavfile:
 	ret
 	.p2align 4
 	.p2align 3
-.L208:
+.L154:
 	movzwl	%r8w, %edx
-	leaq	.LC47(%rip), %rcx
+	leaq	.LC51(%rip), %rcx
 	xorl	%r13d, %r13d
 	call	printf
-	jmp	.L202
+	jmp	.L148
 	.p2align 4
 	.p2align 3
-.L234:
+.L180:
 	movq	%rdi, %rcx
 	salq	$2, %rcx
-	je	.L206
+	je	.L152
 	addq	$32, %rcx
 	call	malloc
 	testq	%rax, %rax
-	je	.L206
+	je	.L152
 	leaq	32(%rax), %r13
 	andq	$-32, %r13
 	movq	%rax, -8(%r13)
-.L205:
+.L151:
 	movq	%rsi, %r9
 	movq	%rdi, %r8
 	movl	$4, %edx
 	movq	%r13, %rcx
 	call	fread
-	jmp	.L202
+	jmp	.L148
 	.p2align 4
 	.p2align 3
-.L206:
+.L152:
 	xorl	%r13d, %r13d
-	jmp	.L205
+	jmp	.L151
 	.p2align 4
 	.p2align 3
-.L235:
+.L181:
 	leaq	32(%rsp), %rcx
 	movq	%rsi, %r9
 	movslq	%ebx, %r8
@@ -1566,7 +1370,7 @@ readWavfile:
 	movl	%edx, 0(%r13,%rax)
 	leal	1(%r12), %edx
 	cmpl	$1, %ebx
-	je	.L225
+	je	.L171
 	movzbl	36(%rsp), %edx
 	movsbl	37(%rsp), %r8d
 	movzbl	35(%rsp), %r9d
@@ -1577,7 +1381,7 @@ readWavfile:
 	movl	%edx, 4(%r13,%rax)
 	leal	2(%r12), %edx
 	cmpl	$6, %ecx
-	jle	.L225
+	jle	.L171
 	movzbl	39(%rsp), %edx
 	movsbl	40(%rsp), %r8d
 	movzbl	38(%rsp), %r9d
@@ -1588,7 +1392,7 @@ readWavfile:
 	movl	%edx, 8(%r13,%rax)
 	leal	3(%r12), %edx
 	cmpl	$9, %ecx
-	jle	.L225
+	jle	.L171
 	movzbl	42(%rsp), %edx
 	movsbl	43(%rsp), %r8d
 	movzbl	41(%rsp), %r9d
@@ -1599,7 +1403,7 @@ readWavfile:
 	movl	%edx, 12(%r13,%rax)
 	leal	4(%r12), %edx
 	cmpl	$12, %ecx
-	jle	.L225
+	jle	.L171
 	movzbl	45(%rsp), %edx
 	movsbl	46(%rsp), %r8d
 	movzbl	44(%rsp), %r9d
@@ -1610,7 +1414,7 @@ readWavfile:
 	movl	%edx, 16(%r13,%rax)
 	leal	5(%r12), %edx
 	cmpl	$15, %ecx
-	jle	.L225
+	jle	.L171
 	movzbl	48(%rsp), %edx
 	movsbl	49(%rsp), %r8d
 	movzbl	47(%rsp), %r9d
@@ -1621,7 +1425,7 @@ readWavfile:
 	movl	%edx, 20(%r13,%rax)
 	leal	6(%r12), %edx
 	cmpl	$18, %ecx
-	jle	.L225
+	jle	.L171
 	movzbl	51(%rsp), %edx
 	movsbl	52(%rsp), %r8d
 	movzbl	50(%rsp), %r9d
@@ -1632,7 +1436,7 @@ readWavfile:
 	movl	%edx, 24(%r13,%rax)
 	leal	7(%r12), %edx
 	cmpl	$21, %ecx
-	jle	.L225
+	jle	.L171
 	movzbl	54(%rsp), %edx
 	movsbl	55(%rsp), %r8d
 	movzbl	53(%rsp), %r9d
@@ -1643,7 +1447,7 @@ readWavfile:
 	movl	%edx, 28(%r13,%rax)
 	leal	8(%r12), %edx
 	cmpl	$24, %ecx
-	jle	.L225
+	jle	.L171
 	movzbl	57(%rsp), %edx
 	movsbl	58(%rsp), %r8d
 	movzbl	56(%rsp), %r9d
@@ -1654,7 +1458,7 @@ readWavfile:
 	movl	%edx, 32(%r13,%rax)
 	leal	9(%r12), %edx
 	cmpl	$27, %ecx
-	jle	.L225
+	jle	.L171
 	movzbl	60(%rsp), %edx
 	addl	$10, %r12d
 	movsbl	61(%rsp), %ecx
@@ -1664,35 +1468,35 @@ readWavfile:
 	orl	%r8d, %edx
 	orl	%ecx, %edx
 	movl	%edx, 36(%r13,%rax)
-	jmp	.L214
+	jmp	.L160
 	.p2align 4
 	.p2align 3
-.L211:
+.L157:
 	xorl	%r13d, %r13d
-	jmp	.L210
+	jmp	.L156
 	.p2align 4
 	.p2align 3
-.L225:
+.L171:
 	movl	%edx, %r12d
-	jmp	.L214
+	jmp	.L160
 	.p2align 4
 	.p2align 3
-.L216:
+.L162:
 	xorl	%r12d, %r12d
-	jmp	.L212
+	jmp	.L158
 	.seh_endproc
 	.section .rdata,"dr"
-.LC48:
+.LC52:
 	.ascii "rb\0"
 	.align 8
-.LC49:
+.LC53:
 	.ascii "File %s already exists! Overwrite (Y/N)?\11\0"
-.LC50:
+.LC54:
 	.ascii "Aborting.\12\0"
 	.align 8
-.LC51:
+.LC55:
 	.ascii "Unrecognized response. Overwrite (Y/N)?\11\0"
-.LC52:
+.LC56:
 	.ascii "wb\0"
 	.text
 	.p2align 4
@@ -1739,28 +1543,28 @@ writeWavfile:
 	movq	%r9, 104(%rsp)
 	movq	%rdx, 128(%rsp)
 	movq	%rdx, 80(%rsp)
-	leaq	.LC48(%rip), %rdx
+	leaq	.LC52(%rip), %rdx
 	movq	%r8, 96(%rsp)
 	movq	%r8, 48(%rsp)
 	movq	%r9, 56(%rsp)
 	call	fopen
 	testq	%rax, %rax
-	je	.L237
+	je	.L183
 	movq	%r12, %rdx
-	leaq	.LC49(%rip), %rcx
+	leaq	.LC53(%rip), %rcx
 	leaq	96(%rsp), %rbx
-	leaq	.LC51(%rip), %rdi
+	leaq	.LC55(%rip), %rdi
 	call	printf
 	movq	__imp___acrt_iob_func(%rip), %rsi
-	jmp	.L241
+	jmp	.L187
 	.p2align 4
 	.p2align 3
-.L259:
+.L205:
 	cmpb	$78, %al
-	je	.L258
+	je	.L204
 	movq	%rdi, %rcx
 	call	printf
-.L241:
+.L187:
 	xorl	%ecx, %ecx
 	call	*%rsi
 	movl	$5, %edx
@@ -1769,10 +1573,10 @@ writeWavfile:
 	call	fgets
 	movzbl	96(%rsp), %eax
 	cmpb	$89, %al
-	jne	.L259
-.L237:
+	jne	.L205
+.L183:
 	movq	%r12, %rcx
-	leaq	.LC52(%rip), %rdx
+	leaq	.LC56(%rip), %rdx
 	call	fopen
 	leaq	48(%rsp), %rcx
 	movl	$1, %r8d
@@ -1782,14 +1586,14 @@ writeWavfile:
 	call	fwrite
 	movzwl	82(%rsp), %eax
 	cmpw	$32, %ax
-	je	.L260
+	je	.L206
 	cmpw	$24, %ax
-	je	.L261
-.L243:
+	je	.L207
+.L189:
 	movq	%r12, %rcx
 	call	fclose
 	movl	$1, %eax
-.L236:
+.L182:
 	addq	$152, %rsp
 	popq	%rbx
 	popq	%rsi
@@ -1802,16 +1606,16 @@ writeWavfile:
 	ret
 	.p2align 4
 	.p2align 3
-.L258:
-	leaq	.LC50(%rip), %rcx
+.L204:
+	leaq	.LC54(%rip), %rcx
 	call	printf
 	xorl	%eax, %eax
-	jmp	.L236
+	jmp	.L182
 	.p2align 4
 	.p2align 3
-.L261:
+.L207:
 	cmpl	$7, %ebp
-	jle	.L249
+	jle	.L195
 	leal	-8(%rbp), %r15d
 	movq	%r13, %rsi
 	leaq	96(%rsp), %rbx
@@ -1822,13 +1626,13 @@ writeWavfile:
 	leaq	32(%r13,%rax), %r14
 	.p2align 4
 	.p2align 3
-.L245:
+.L191:
 	vmovdqa	(%rsi), %ymm1
 	movq	%r12, %r9
 	movl	$4, %r8d
 	movl	$3, %edx
 	movq	%rbx, %rcx
-	vpshufb	.LC53(%rip), %ymm1, %ymm0
+	vpshufb	.LC57(%rip), %ymm1, %ymm0
 	vmovdqu	%ymm0, 96(%rsp)
 	vzeroupper
 	call	fwrite
@@ -1839,12 +1643,12 @@ writeWavfile:
 	movq	%rdi, %rcx
 	call	fwrite
 	cmpq	%r14, %rsi
-	jne	.L245
+	jne	.L191
 	leal	8(,%r15,8), %eax
 	subl	%eax, %ebp
-.L244:
+.L190:
 	testl	%ebp, %ebp
-	jle	.L243
+	jle	.L189
 	cltq
 	leal	-1(%rbp), %edx
 	leaq	44(%rsp), %rsi
@@ -1853,7 +1657,7 @@ writeWavfile:
 	leaq	4(%r13,%rax,4), %rdi
 	.p2align 4
 	.p2align 3
-.L247:
+.L193:
 	movl	(%rbx), %eax
 	movq	%r12, %r9
 	movl	$1, %r8d
@@ -1863,33 +1667,33 @@ writeWavfile:
 	movl	%eax, 44(%rsp)
 	call	fwrite
 	cmpq	%rbx, %rdi
-	jne	.L247
-	jmp	.L243
+	jne	.L193
+	jmp	.L189
 	.p2align 4
 	.p2align 3
-.L260:
+.L206:
 	movq	%r12, %r9
 	movq	%r14, %r8
 	movl	$4, %edx
 	movq	%r13, %rcx
 	call	fwrite
-	jmp	.L243
-.L249:
+	jmp	.L189
+.L195:
 	xorl	%eax, %eax
-	jmp	.L244
+	jmp	.L190
 	.seh_endproc
 	.def	__main;	.scl	2;	.type	32;	.endef
 	.section .rdata,"dr"
 	.align 8
-.LC54:
+.LC58:
 	.ascii "Use the following params:\12\11-i\11in file path\12\11-s\11start rate\12\11-e\11end rate\12\11-d\11start delay time\12\11-H\11end hold time\12\11out file path\12\0"
 	.align 8
-.LC55:
+.LC59:
 	.ascii "Some param parse error occured\12\0"
-.LC56:
+.LC60:
 	.ascii "Unable to open file at %s\12\0"
 	.align 8
-.LC57:
+.LC61:
 	.ascii "Verified file header, continuing...\12\0"
 	.section	.text.startup,"x"
 	.p2align 4
@@ -1917,16 +1721,16 @@ main:
 	movl	%r12d, %ecx
 	call	parseParams
 	cmpl	$1, %eax
-	je	.L274
+	je	.L220
 	cmpl	$2, %eax
-	je	.L275
+	je	.L221
 	movq	96(%rsp), %r13
-	leaq	.LC48(%rip), %rdx
+	leaq	.LC52(%rip), %rdx
 	movq	%r13, %rcx
 	call	fopen
 	movq	%rax, %r12
 	testq	%rax, %rax
-	je	.L276
+	je	.L222
 	leaq	128(%rsp), %r13
 	movq	%rax, %r9
 	movl	$1, %r8d
@@ -1936,25 +1740,25 @@ main:
 	movq	%r13, %rcx
 	call	verifyHeader
 	testb	%al, %al
-	jne	.L267
-.L268:
+	jne	.L213
+.L214:
 	movl	$1, %eax
-.L262:
+.L208:
 	addq	$184, %rsp
 	popq	%rbx
 	popq	%r12
 	popq	%r13
 	popq	%r14
 	ret
-.L267:
-	leaq	.LC57(%rip), %rcx
+.L213:
+	leaq	.LC61(%rip), %rcx
 	call	printf
 	movq	%r13, %rdx
 	movq	%r12, %rcx
 	call	readWavfile
 	movq	%rax, %rbx
 	testq	%rax, %rax
-	je	.L268
+	je	.L214
 	movq	%r12, %rcx
 	call	fclose
 	movzwl	162(%rsp), %ecx
@@ -1995,28 +1799,28 @@ main:
 	call	free
 	xorl	%eax, %eax
 	testq	%r12, %r12
-	je	.L262
+	je	.L208
 	movq	-8(%r12), %rcx
 	movl	%eax, 76(%rsp)
 	call	free
 	movl	76(%rsp), %eax
-	jmp	.L262
-.L275:
-	leaq	.LC55(%rip), %rcx
+	jmp	.L208
+.L221:
+	leaq	.LC59(%rip), %rcx
 	call	printf
 	movl	$1, %eax
-	jmp	.L262
-.L276:
+	jmp	.L208
+.L222:
 	movq	%r13, %rdx
-	leaq	.LC56(%rip), %rcx
+	leaq	.LC60(%rip), %rcx
 	call	printf
 	movl	$1, %eax
-	jmp	.L262
-.L274:
-	leaq	.LC54(%rip), %rcx
+	jmp	.L208
+.L220:
+	leaq	.LC58(%rip), %rcx
 	call	printf
 	xorl	%eax, %eax
-	jmp	.L262
+	jmp	.L208
 	.seh_endproc
 	.globl	chebCoeffs
 	.section .rdata,"dr"
@@ -2067,34 +1871,41 @@ sineTable_4q:
 .LC6:
 	.long	0
 	.long	1071644672
-	.align 32
-.LC7:
-	.long	1117976963
-	.long	1117976963
-	.long	1117976963
-	.long	1117976963
-	.long	1117976963
-	.long	1117976963
-	.long	1117976963
-	.long	1117976963
-	.align 32
+	.set	.LC7,.LC10
+	.align 4
 .LC8:
-	.long	-1136062501
-	.long	-1136062501
-	.long	-1136062501
-	.long	-1136062501
-	.long	-1136062501
-	.long	-1136062501
-	.long	-1136062501
-	.long	-1136062501
-	.align 32
+	.long	1011421147
+	.align 4
 .LC9:
-	.quad	2194728288767
-	.quad	2194728288767
-	.quad	2194728288767
-	.quad	2194728288767
+	.long	1056964608
 	.align 32
 .LC10:
+	.long	1117976963
+	.long	1117976963
+	.long	1117976963
+	.long	1117976963
+	.long	1117976963
+	.long	1117976963
+	.long	1117976963
+	.long	1117976963
+	.align 32
+.LC11:
+	.long	-1136062501
+	.long	-1136062501
+	.long	-1136062501
+	.long	-1136062501
+	.long	-1136062501
+	.long	-1136062501
+	.long	-1136062501
+	.long	-1136062501
+	.align 32
+.LC12:
+	.quad	2194728288767
+	.quad	2194728288767
+	.quad	2194728288767
+	.quad	2194728288767
+	.align 32
+.LC13:
 	.long	128
 	.long	128
 	.long	128
@@ -2104,7 +1915,7 @@ sineTable_4q:
 	.long	128
 	.long	128
 	.align 32
-.LC11:
+.LC14:
 	.long	-1090519040
 	.long	-1090519040
 	.long	-1090519040
@@ -2114,49 +1925,49 @@ sineTable_4q:
 	.long	-1090519040
 	.long	-1090519040
 	.align 4
-.LC12:
+.LC15:
 	.long	1078530011
 	.align 8
-.LC13:
+.LC16:
 	.long	1413754136
 	.long	1075388923
 	.align 4
-.LC14:
+.LC17:
 	.long	789717965
 	.align 4
-.LC15:
+.LC18:
 	.long	-1295496101
 	.align 4
-.LC16:
+.LC19:
 	.long	908674213
 	.align 4
-.LC17:
+.LC20:
 	.long	-1187647768
 	.align 4
-.LC18:
+.LC21:
 	.long	1004073975
 	.align 4
-.LC19:
+.LC22:
 	.long	-1110474373
 	.align 4
-.LC20:
+.LC23:
 	.long	867941678
 	.align 4
-.LC35:
+.LC38:
 	.long	1065353216
-	.align 8
-.LC39:
-	.long	0
-	.long	1072693248
 	.align 4
-.LC41:
+.LC43:
 	.long	1040187392
 	.align 8
-.LC42:
+.LC44:
 	.long	0
 	.long	1075838976
-	.align 32
+	.align 8
 .LC45:
+	.long	0
+	.long	1072693248
+	.align 32
+.LC49:
 	.byte	-1
 	.byte	0
 	.byte	1
@@ -2190,7 +2001,7 @@ sineTable_4q:
 	.byte	26
 	.byte	27
 	.align 32
-.LC53:
+.LC57:
 	.byte	0
 	.byte	1
 	.byte	2
@@ -2229,7 +2040,7 @@ sineTable_4q:
 	.def	atof;	.scl	2;	.type	32;	.endef
 	.def	strncmp;	.scl	2;	.type	32;	.endef
 	.def	malloc;	.scl	2;	.type	32;	.endef
-	.def	memcpy;	.scl	2;	.type	32;	.endef
+	.def	clock_gettime;	.scl	2;	.type	32;	.endef
 	.def	free;	.scl	2;	.type	32;	.endef
 	.def	fread;	.scl	2;	.type	32;	.endef
 	.def	fopen;	.scl	2;	.type	32;	.endef

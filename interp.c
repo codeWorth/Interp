@@ -8,6 +8,8 @@
 #include <time.h>
 #include "fastmath.h"
 
+// #define SIMD
+
 typedef enum {
     EXEC = 0,
     HELP = 1,
@@ -122,19 +124,22 @@ bool verifyHeader(const WavHeader* header) {
 
 /**
  * @brief Constructs new array with data from given array plus padding on either side.
+ * Converts values to floats.
  * 
  * @param data Original data to copy.
  * @param count Number of enteries in original data.
  * @param padSize Size of padding on each side.
  * @param padValue Value to pad with.
- * @return int32_t* Pointer to padded data array.
+ * @return float* Pointer to padded data array.
  */
-int32_t* pad(const int32_t* data, int count, int padSize, int32_t padValue) {
-    int32_t* padded = _mm_malloc(sizeof(int32_t) * (count + padSize*2), 32);
-    memcpy(padded + padSize, data, count * sizeof(int32_t));
+float* padAndFloat(const int32_t* data, int count, int padSize, float padValue) {
+    float* padded = _mm_malloc(sizeof(float) * (count + padSize*2), 32);
+    for (int i = 0; i < count; i++) {
+        padded[i+padSize] = data[i];
+    }
     for (int i = 0; i < padSize; i++) {
         padded[i] = padValue;
-        padded[count + padSize*2 - 1 - i] = padValue;
+        padded[count + padSize + i] = padValue;
     }
     return padded;
 }
@@ -223,7 +228,7 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* ups
     struct timespec start, finish;
 
     int paddedWindowSize = ceil(windowSize / 8.f) * 8 + 1;
-    int32_t* paddedData = pad(data, dataCount, paddedWindowSize/2, 0);
+    float* paddedData = padAndFloat(data, dataCount, paddedWindowSize/2, 0);
     int upIndex = 0;
     int32_t* result = _mm_malloc(sizeof(int32_t) * upCount, 32);
 
@@ -252,21 +257,25 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* ups
         double sum = 0;
 
         for (int i = 0; i < paddedWindowSize; i += 8) {
+            // begin data load as soon as possible
+            // origN will always be 8 adjacent indecies beginning at (origIndex + i)
+            __m256 dataChunk = _mm256_loadu_ps(paddedData + origIndex + i);
+
             // double dt = upsamples[upIndex]*sampleRate - origN;
             __m256 origN_f = _mm256_cvtepi32_ps(origN);
             __m256 dt = _mm256_sub_ps(upsample, origN_f);
 
-            __m256 xs = _mm256_mul_ps(PI, dt);          // M_PI * dt
-            __m256 sines; fastSinSIMD(&xs, &sines);     // sin(M_PI * dt)
+            __m256 xs = _mm256_mul_ps(PI, dt);                  // M_PI * dt
             __m256 isZero = _mm256_cmp_ps(xs, _mm256_setzero_ps(), _CMP_EQ_OQ); // dt == 0
-            __m256 divs = _mm256_div_ps(sines, xs);     // sin(M_PI * dt) / (M_PI * dt)
-            __m256 sinc = _mm256_blendv_ps(divs, ones, isZero); // dt == 0 ? 1 : result
+            __m256 sines; fastSinSIMD(&xs, &sines);             // sin(M_PI * dt)
 
-            // origN will always be 8 adjacent indecies beginning at (origIndex + i)
-            __m256 dataChunk = _mm256_cvtepi32_ps(_mm256_loadu_si256((const __m256i_u*)(paddedData + origIndex + i)));
-            __m256 results = _mm256_mul_ps(dataChunk, sinc); // paddedData[origN] * sinc;
+            __m256 divs = _mm256_div_ps(sines, xs);         // sinc(M_PI * dt) / (M_PI * dt)
+            __m256 sinc = _mm256_blendv_ps(divs, ones, isZero); // dt == 0 ? 1 : div
+            
+            __m256 results =  _mm256_mul_ps(dataChunk, sinc);  // paddedData[origN]*sinc
 
             sum += sum8(&results);
+
             origN = _mm256_add_epi32(origN, offset);
         }
 
@@ -274,14 +283,12 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* ups
 
         double sum = 0;
 
-        for (int i = 0; i < paddedWindowSize; i += 8) {
-            for (int k = 0; k < 8; k++) {
-                int origN = origIndex - paddedWindowSize/2 + i + k;
-                
-                double dt = upsamples[upIndex]*sampleRate - origN;
-                double sinc = dt == 0 ? 1 : fastSinD(M_PI * dt) / (M_PI * dt);
-                sum += (double)paddedData[origIndex + i + k] * sinc;
-            }
+        for (int i = 0; i < paddedWindowSize; i++) {
+            int origN = origIndex - paddedWindowSize/2 + i;
+            
+            float dt = upsamples[upIndex]*sampleRate - origN;
+            float sinc = dt == 0 ? 1 : fastSinF(M_PI * dt) / (M_PI * dt);
+            sum += (float)paddedData[origIndex + i] * sinc;
         }
 
         #endif
