@@ -38,8 +38,6 @@ typedef struct {
     char dataChunkID[4];
     uint32_t dataChunkSize;
 } WavHeader;
-    return a > b ? a : b;
-}
 
 WavHeader copyHeader(const WavHeader* orig, uint32_t newDataChunkSize) {
     WavHeader newHeader = *orig;
