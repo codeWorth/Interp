@@ -38,11 +38,6 @@ typedef struct {
     char dataChunkID[4];
     uint32_t dataChunkSize;
 } WavHeader;
-
-int min(int a, int b) {
-    return a < b ? a : b;
-}
-int max(int a, int b) {
     return a > b ? a : b;
 }
 
@@ -128,6 +123,25 @@ bool verifyHeader(const WavHeader* header) {
 }
 
 /**
+ * @brief Constructs new array with data from given array plus padding on either side.
+ * 
+ * @param data Original data to copy.
+ * @param count Number of enteries in original data.
+ * @param padSize Size of padding on each side.
+ * @param padValue Value to pad with.
+ * @return int32_t* Pointer to padded data array.
+ */
+int32_t* pad(const int32_t* data, int count, int padSize, int32_t padValue) {
+    int32_t* padded = _mm_malloc(sizeof(int32_t) * (count + padSize*2), 32);
+    memcpy(padded + padSize, data, count * sizeof(int32_t));
+    for (int i = 0; i < padSize; i++) {
+        padded[i] = padValue;
+        padded[count + padSize*2 - 1 - i] = padValue;
+    }
+    return padded;
+}
+
+/**
  * @brief Generates a sequence of time values in seconds to sample the input data at. 
  * Output sample rate will change linearly from startK*sampleRate to endK*sampleRate.
  * 
@@ -206,10 +220,12 @@ float* upsampleCurve(float startK, float endK, float startOffset, float endOffse
  * @param windowSize Size of window around each sample time. Must be odd.
  * @return Array containing the upsampled signal.
  */
-int32_t* fastSincInterp(int sampleRate, int32_t* data,int dataCount, float* upsamples, int upCount, int windowSize) {
+int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* upsamples, int upCount, int windowSize) {
     assert(windowSize%2 == 1);
     struct timespec start, finish;
 
+    int paddedWindowSize = ceil(windowSize / 8.f) * 8 + 1;
+    int32_t* paddedData = pad(data, dataCount, paddedWindowSize/2, 0);
     int upIndex = 0;
     int32_t* result = _mm_malloc(sizeof(int32_t) * upCount, 32);
 
@@ -220,25 +236,24 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data,int dataCount, float* upsa
     while (upIndex < upCount) {
         int origIndex = upsamples[upIndex] * sampleRate; // gets the nearest orig index to the given time stamp
 
-        int lower = max(0, origIndex - windowSize/2) + windowSize/2 - origIndex;
-        int upper = min(dataCount, origIndex + windowSize/2+1) + windowSize/2 - origIndex;
-
         double sum = 0;
-        for (int i = lower; i < upper; i++) {
+        for (int i = 0; i < windowSize; i++) {
             int origN = origIndex + i - windowSize/2;
 
             double dt = upsamples[upIndex]*sampleRate - origN;
             double sinc = dt == 0 ? 1 : fastSinD(M_PI * dt) / (M_PI * dt);
-            sum += (double)data[origN] * sinc;
+            sum += (double)paddedData[origN + paddedWindowSize/2] * sinc;
         }
+
         result[upIndex] = sum;
 
         upIndex++;
     }
     clock_gettime(CLOCK_REALTIME, &finish);
 
-    printf("Proc took %d seconds and %d milliseconds.\n", (finish.tv_sec - start.tv_sec), (finish.tv_nsec - start.tv_nsec) / 1000000L);
+    _mm_free(paddedData);
 
+    printf("Proc took %d seconds and %d milliseconds.\n", (finish.tv_sec - start.tv_sec), (finish.tv_nsec - start.tv_nsec) / 1000000L);
     printf("Done upsampling, writing result...\n");
 
     return result;
