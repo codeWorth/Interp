@@ -8,7 +8,8 @@
 #include <time.h>
 #include "fastmath.h"
 
-// #define SIMD
+#define F_PI 3.1415926535f
+#define SIMD
 
 typedef enum {
     EXEC = 0,
@@ -267,7 +268,7 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* ups
 
             __m256 xs = _mm256_mul_ps(PI, dt);                  // M_PI * dt
             __m256 isZero = _mm256_cmp_ps(xs, _mm256_setzero_ps(), _CMP_EQ_OQ); // dt == 0
-            __m256 sines; fastSinSIMD(&xs, &sines);             // sin(M_PI * dt)
+            __m256 sines; chebSinSIMD(&xs, &sines);             // sin(M_PI * dt)
 
             __m256 divs = _mm256_div_ps(sines, xs);         // sinc(M_PI * dt) / (M_PI * dt)
             __m256 sinc = _mm256_blendv_ps(divs, ones, isZero); // dt == 0 ? 1 : div
@@ -286,9 +287,9 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* ups
         for (int i = 0; i < paddedWindowSize; i++) {
             int origN = origIndex - paddedWindowSize/2 + i;
             
-            float dt = upsamples[upIndex]*sampleRate - origN;
-            float sinc = dt == 0 ? 1 : fastSinF(M_PI * dt) / (M_PI * dt);
-            sum += (float)paddedData[origIndex + i] * sinc;
+            double dt = upsamples[upIndex]*sampleRate - origN;
+            double sinc = dt == 0 ? 1 : fastSinD(M_PI * dt) / (M_PI * dt);
+            sum += paddedData[origIndex + i] * sinc;
         }
 
         #endif

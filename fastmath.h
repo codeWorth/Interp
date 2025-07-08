@@ -76,7 +76,7 @@ float fastSinF(float x) {
 void fastSinSIMD(__m256* xs, __m256* result) {
     // x * (0.5f * SINE_TABLE_SIZE / M_PI);
     __m256 scale = _mm256_set1_ps(0.5f * SINE_TABLE_SIZE / F_PI);
-    __m256i sinIndex = _mm256_cvtps_epi32(_mm256_mul_ps(*xs, scale));
+    __m256i sinIndex = _mm256_cvtps_epi32(*xs * scale);
 
     // sinIndex * (-2.f * M_PI / SINE_TABLE_SIZE) + x;
     scale = _mm256_set1_ps(-2.f * F_PI / SINE_TABLE_SIZE);
@@ -85,13 +85,13 @@ void fastSinSIMD(__m256* xs, __m256* result) {
 
     // sinIndex + SINE_TABLE_SIZE/4
     __m256i offset = _mm256_set1_epi32(SINE_TABLE_SIZE/4);
-    __m256i cosIndex = _mm256_add_epi32(sinIndex, offset);
+    __m256i cosIndex = sinIndex + offset;
 
     // sinIndex &= SINE_TABLE_SIZE-1;
     // cosIndex &= SINE_TABLE_SIZE-1;
     __m256i mask = _mm256_set1_epi32(SINE_TABLE_SIZE-1);
-    sinIndex = _mm256_and_si256(sinIndex, mask);
-    cosIndex = _mm256_and_si256(cosIndex, mask);
+    sinIndex = sinIndex & mask;
+    cosIndex = cosIndex & mask;
 
     // double sinVal = sineTable_4q[sinIndex];
     // double cosVal = sineTable_4q[cosIndex];
@@ -100,8 +100,7 @@ void fastSinSIMD(__m256* xs, __m256* result) {
 
     // (-0.5f*sinVal*delta + cosVal)
     scale = _mm256_set1_ps(-0.5f);
-    __m256 inner = _mm256_mul_ps(scale, sinVal);
-    inner = _mm256_fmadd_ps(inner, delta, cosVal);
+    __m256 inner = _mm256_fmadd_ps(scale * sinVal, delta, cosVal);
 
     // (cosVal - 0.5f*sinVal*delta) * delta + sinVal;
     *result = _mm256_fmadd_ps(inner, delta, sinVal);
@@ -130,11 +129,11 @@ float chebSin(float x) {
     float pi_minor = -0.00000008742278f;
 
     int piCount = x / pi_major; // number of whole PIs contained in x
-    int piSign = piCount >> 31; // piCount > 0 ? 0x00 : 0xFF;
-    int diff = ((piCount&1) ^ piSign) + (piSign&1); // negate (piCount&1) if piSign is 0xFF
-    // int diff = piCount > 0 ? piCount&1 : -(piCount&1);
+    unsigned int u_piCount = piCount;
+    int diff = piCount & (~u_piCount >> 31); // equiv to piCount > 0 ? piCount&1 : 0 
+    int pi2Count = piCount >> 1 + diff;
 
-    x += 2*M_PI * -(piCount/2 + diff);
+    x += 2*M_PI * -pi2Count;
 
     float x2 = x*x;
     float p11 = chebCoeffs[5];
@@ -146,32 +145,29 @@ float chebSin(float x) {
     return (x - pi_major - pi_minor) * (x + pi_major + pi_minor) * p1 * x;
 }
 
-// void chebSinSIMD(__m256* x, __m256* result) {
-//     __m256 pi_major = _mm256_set1_ps(3.1415927f);
-//     __m256 pi_minor = _mm256_set1_ps(-0.00000008742278f);
-//     __m256i ones = _mm256_set1_epi32(1);
+void chebSinSIMD(__m256* x, __m256* result) {
+    __m256 pi_major = _mm256_set1_ps(3.1415927f);
+    __m256 pi_minor = _mm256_set1_ps(-0.00000008742278f);
+    __m256i ones = _mm256_set1_epi32(1);
 
-//     __m256i piCount = _mm256_cvtps_epi32(_mm256_div_ps(*x, pi_major));
-//     __m256i piSign = _mm256_srai_epi32(piCount, 31);
-//     __m256i diff =  _mm256_add_epi32(
-//         _mm256_xor_epi32(
-//             _mm256_and_si256(piCount, ones), 
-//             piSign), 
-//         _mm256_and_si256(piSign, ones)
-//     );
+    __m256i piCount = _mm256_cvtps_epi32(*x / pi_major);
+    __m256i diff =  piCount & _mm256_srli_epi32(~piCount, 31);
 
+    __m256 pi2neg = _mm256_set1_ps(-2*F_PI);
+    __m256i offset = _mm256_srai_epi32(piCount, 1) + diff;
+    __m256 offset_f = _mm256_cvtepi32_ps(offset);
+    __m256 xNorm = _mm256_fmadd_ps(pi2neg, offset_f, *x);
 
-//     x += 2*M_PI * -(piCount/2 + diff);
+    __m256 x2 = xNorm * xNorm;
+    __m256 p11 = _mm256_set1_ps(chebCoeffs[5]);
+    __m256 p9  = _mm256_fmadd_ps(p11, x2, _mm256_set1_ps(chebCoeffs[4]));
+    __m256 p7  = _mm256_fmadd_ps(p9, x2, _mm256_set1_ps(chebCoeffs[3])); 
+    __m256 p5  = _mm256_fmadd_ps(p7, x2, _mm256_set1_ps(chebCoeffs[2])); 
+    __m256 p3  = _mm256_fmadd_ps(p5, x2, _mm256_set1_ps(chebCoeffs[1]));
+    __m256 p1  = _mm256_fmadd_ps(p3, x2, _mm256_set1_ps(chebCoeffs[0]));
 
-//     float x2 = x*x;
-//     float p11 = chebCoeffs[5];
-//     float p9  = p11*x2 + chebCoeffs[4];
-//     float p7  = p9*x2  + chebCoeffs[3];
-//     float p5  = p7*x2  + chebCoeffs[2];
-//     float p3  = p5*x2  + chebCoeffs[1];
-//     float p1  = p3*x2  + chebCoeffs[0];
-//     return (x - pi_major - pi_minor) * (x + pi_major + pi_minor) * p1 * x;
-// }
+    *result = (xNorm - pi_major - pi_minor) * (xNorm + pi_major + pi_minor) * p1 * xNorm;
+}
 
 // per https://stackoverflow.com/questions/13219146/how-to-sum-m256-horizontally
 float sum8(__m256* x) {
