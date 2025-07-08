@@ -264,16 +264,16 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* ups
 
             // double dt = upsamples[upIndex]*sampleRate - origN;
             __m256 origN_f = _mm256_cvtepi32_ps(origN);
-            __m256 dt = _mm256_sub_ps(upsample, origN_f);
+            __m256 dt = upsample - origN_f;
 
-            __m256 xs = _mm256_mul_ps(PI, dt);                  // M_PI * dt
+            __m256 xs = PI * dt;
             __m256 isZero = _mm256_cmp_ps(xs, _mm256_setzero_ps(), _CMP_EQ_OQ); // dt == 0
-            __m256 sines; chebSinSIMD(&xs, &sines);             // sin(M_PI * dt)
+            __m256 sines; chebSinSIMD(&xs, &sines);
 
-            __m256 divs = _mm256_div_ps(sines, xs);         // sinc(M_PI * dt) / (M_PI * dt)
+            __m256 divs = sines / xs;
             __m256 sinc = _mm256_blendv_ps(divs, ones, isZero); // dt == 0 ? 1 : div
             
-            __m256 results =  _mm256_mul_ps(dataChunk, sinc);  // paddedData[origN]*sinc
+            __m256 results =  dataChunk * sinc;
 
             sum += sum8(&results);
 

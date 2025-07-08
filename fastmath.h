@@ -67,7 +67,6 @@ float fastSinF(float x) {
 
     return sinVal + (cosVal - 0.5f*sinVal*delta) * delta;
 }
-
 // Switching to floats somehow causes ~1 second slowdown
 // Hopefully SIMD easily makes up the difference
 // test 1:
