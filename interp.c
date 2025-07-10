@@ -20,10 +20,10 @@ typedef enum {
 typedef struct {
     char const* inFile;
     char const* outFile;
-    float startSpd;
-    float endSpd;
-    float delayTime;
-    float holdTime;
+    double startSpd;
+    double endSpd;
+    double delayTime;
+    double holdTime;
 } Params;
 
 typedef struct {
@@ -146,6 +146,28 @@ float* padAndFloat(const int32_t* data, int count, int padSize, float padValue) 
 }
 
 /**
+ * @brief Constructs new array with data from given array plus padding on either side.
+ * Converts values to doubles.
+ * 
+ * @param data Original data to copy.
+ * @param count Number of enteries in original data.
+ * @param padSize Size of padding on each side.
+ * @param padValue Value to pad with.
+ * @return double* Pointer to padded data array.
+ */
+double* padAndDouble(const int32_t* data, int count, int padSize, double padValue) {
+    double* padded = _mm_malloc(sizeof(double) * (count + padSize*2), 32);
+    for (int i = 0; i < count; i++) {
+        padded[i+padSize] = data[i];
+    }
+    for (int i = 0; i < padSize; i++) {
+        padded[i] = padValue;
+        padded[count + padSize + i] = padValue;
+    }
+    return padded;
+}
+
+/**
  * @brief Generates a sequence of time values in seconds to sample the input data at. 
  * Output sample rate will change linearly from startK*sampleRate to endK*sampleRate.
  * 
@@ -158,22 +180,22 @@ float* padAndFloat(const int32_t* data, int count, int padSize, float padValue) 
  * @param totalUpsamples Location to store the number of samples in the result.
  * @return Array containing the upsampled time stamps.
  */
-float* upsampleCurve(float startK, float endK, float startOffset, float endOffset, int count, int sampleRate, int* totalUpsamples) {
+double* upsampleCurve(double startK, double endK, double startOffset, double endOffset, int count, int sampleRate, int* totalUpsamples) {
     // In the original data, data point N is located at T = N / sampleRate
     // For the beginning section of the upsample, data point N is located at T = N * startK / sampleRate
     // Similar for the ending section of the upscale
     // Hence we store (startK / sampleRate) and (endK / sampleRate)
     // Then for the increasing section, we must smoothly go from (startK / sampleRate) to (endK / sampleRate)
-    float startRatePerSample = startK / sampleRate;
-    float endRatePerSample = endK / sampleRate;
+    double startRatePerSample = startK / sampleRate;
+    double endRatePerSample = endK / sampleRate;
 
-    float origDuration = (float)count / sampleRate; // how many seconds long the original data is
-    float curveDuration = origDuration - startOffset - endOffset; // how many seconds spent increasing sample rate
+    double origDuration = (double)count / sampleRate; // how many seconds long the original data is
+    double curveDuration = origDuration - startOffset - endOffset; // how many seconds spent increasing sample rate
     assert(curveDuration > 0.f);
 
     // these values are non-integers for now, which will be corrected later
-    float startHoldSamples = startOffset / startRatePerSample; // number of samples to hold at the starting sample rate
-    float endHoldSamples = endOffset / startRatePerSample; // number of samples to hold at the ending sample rate
+    double startHoldSamples = startOffset / startRatePerSample; // number of samples to hold at the starting sample rate
+    double endHoldSamples = endOffset / startRatePerSample; // number of samples to hold at the ending sample rate
 
     /*
     Solves for (A, B, n) given the following contraints:
@@ -182,18 +204,18 @@ float* upsampleCurve(float startK, float endK, float startOffset, float endOffse
         p'(0) = sr1
         p'(n) = sr2
     */
-    float curveSamples = 2*curveDuration / (startRatePerSample + endRatePerSample);
-    float curveA = (endRatePerSample - startRatePerSample) / (2 * curveSamples);
-    float curveB = startRatePerSample;
+    double curveSamples = 2*curveDuration / (startRatePerSample + endRatePerSample);
+    double curveA = (endRatePerSample - startRatePerSample) / (2 * curveSamples);
+    double curveB = startRatePerSample;
 
     *totalUpsamples = (int)ceil(startHoldSamples+curveSamples+endHoldSamples); // accounts for each # of samples being possible non-int
-    float* upsamples = malloc(sizeof(float) * *totalUpsamples);
+    double* upsamples = malloc(sizeof(double) * *totalUpsamples);
 
     for (int i = 0; i < *totalUpsamples; i++) {
         if (i < ceil(startHoldSamples)) {
             upsamples[i] = i * startRatePerSample;
         } else if (i < ceil(startHoldSamples + curveSamples)) {
-            float n = i - startHoldSamples;
+            double n = i - startHoldSamples;
             upsamples[i] = curveA * n*n + curveB * n + startOffset;
         } else {
             upsamples[i] = endRatePerSample * (i - startHoldSamples - curveSamples) + startOffset + curveDuration;
@@ -224,12 +246,13 @@ float* upsampleCurve(float startK, float endK, float startOffset, float endOffse
  * @param windowSize Size of window around each sample time. Must be odd.
  * @return Array containing the upsampled signal.
  */
-int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* upsamples, int upCount, int windowSize) {
+int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, double* upsamples, int upCount, int windowSize) {
     assert(windowSize%2 == 1);
     struct timespec start, finish;
 
     int paddedWindowSize = ceil(windowSize / 8.f) * 8 + 1;
-    float* paddedData = padAndFloat(data, dataCount, paddedWindowSize/2, 0);
+    // float* paddedData = padAndFloat(data, dataCount, paddedWindowSize/2, 0);     // 3180 ms
+    double* paddedDataD = padAndDouble(data, dataCount, paddedWindowSize/2, 0);     // 4540 ms, -110db diff (insignificant)
     int upIndex = 0;
     int32_t* result = _mm_malloc(sizeof(int32_t) * upCount, 32);
 
@@ -240,10 +263,10 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* ups
     #ifdef SIMD
     // prepare some vectors
     int startN = -paddedWindowSize/2;
-    __m256i inc = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
-    __m256 PI = _mm256_set1_ps(M_PI);
-    __m256 ones = _mm256_set1_ps(1.f);
-    __m256i offset = _mm256_set1_epi32(8);
+    __m256i inc = _mm256_setr_epi32(0, 1, 2, 3, -1, -1, -1, -1);
+    __m256d PI = _mm256_set1_pd(M_PI);
+    __m256d ones = _mm256_set1_pd(1.f);
+    __m256i offset = _mm256_set1_epi32(4);
     #endif
 
     // loop over all upsamples
@@ -252,30 +275,30 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* ups
 
         #ifdef SIMD
 
-        __m256 upsample = _mm256_set1_ps(upsamples[upIndex]*sampleRate);
+        __m256d upsample = _mm256_set1_pd(upsamples[upIndex]*sampleRate);
         __m256i origN = _mm256_add_epi32(inc, _mm256_set1_epi32(origIndex - paddedWindowSize/2)); // origN = origIndex - windowSize/2 + i
 
         double sum = 0;
 
-        for (int i = 0; i < paddedWindowSize; i += 8) {
+        for (int i = 0; i < paddedWindowSize; i += 4) {
             // begin data load as soon as possible
             // origN will always be 8 adjacent indecies beginning at (origIndex + i)
-            __m256 dataChunk = _mm256_loadu_ps(paddedData + origIndex + i);
+            __m256d dataChunk = _mm256_loadu_pd(paddedDataD + origIndex + i);
 
             // double dt = upsamples[upIndex]*sampleRate - origN;
-            __m256 origN_f = _mm256_cvtepi32_ps(origN);
-            __m256 dt = upsample - origN_f;
+            __m256d origN_f = _mm256_cvtepi32_pd(_mm256_castsi256_si128(origN));
+            __m256d dt = upsample - origN_f;
 
-            __m256 xs = PI * dt;
-            __m256 isZero = _mm256_cmp_ps(xs, _mm256_setzero_ps(), _CMP_EQ_OQ); // dt == 0
-            __m256 sines; chebSinSIMD(&xs, &sines);
+            __m256d xs = PI * dt;
+            __m256d isZero = _mm256_cmp_pd(xs, _mm256_setzero_pd(), _CMP_EQ_OQ); // dt == 0
+            __m256d sines; fastSinSIMD_d(&xs, &sines);
 
-            __m256 divs = sines / xs;
-            __m256 sinc = _mm256_blendv_ps(divs, ones, isZero); // dt == 0 ? 1 : div
+            __m256d divs = sines / xs;
+            __m256d sinc = _mm256_blendv_pd(divs, ones, isZero); // dt == 0 ? 1 : div
             
-            __m256 results =  dataChunk * sinc;
+            __m256d results =  dataChunk * sinc;
 
-            sum += sum8(&results);
+            sum += sum4(&results);
 
             origN = _mm256_add_epi32(origN, offset);
         }
@@ -289,7 +312,7 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* ups
             
             double dt = upsamples[upIndex]*sampleRate - origN;
             double sinc = dt == 0 ? 1 : fastSinD(M_PI * dt) / (M_PI * dt);
-            sum += paddedData[origIndex + i] * sinc;
+            sum += paddedDataD[origIndex + i] * sinc;
         }
 
         #endif
@@ -299,9 +322,9 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, float* ups
     }
     clock_gettime(CLOCK_REALTIME, &finish);
 
-    _mm_free(paddedData);
+    _mm_free(paddedDataD);
 
-    printf("Proc took %d seconds and %d milliseconds.\n", (finish.tv_sec - start.tv_sec), (finish.tv_nsec - start.tv_nsec) / 1000000L);
+    printf("Proc took %d milliseconds.\n", (finish.tv_sec - start.tv_sec)*1000 + (finish.tv_nsec - start.tv_nsec) / 1000000L);
     printf("Done upsampling, writing result...\n");
 
     return result;
@@ -473,8 +496,8 @@ int main(int argc, char const *argv[]) {
 
     int upCount;
     int origCount = getDataChunkCount(&header);
-    float* upsamples = upsampleCurve(params.startSpd, params.endSpd, params.delayTime, params.holdTime, origCount, header.sampleRate, &upCount);
-    int32_t* upsampledData = fastSincInterp(header.sampleRate, data, origCount, upsamples, upCount, 4095);
+    double* upsamples = upsampleCurve(params.startSpd, params.endSpd, params.delayTime, params.holdTime, origCount, header.sampleRate, &upCount);
+    int32_t* upsampledData = fastSincInterp(header.sampleRate, data, origCount, upsamples, upCount, 2047);
     free(upsamples);
 
     writeWavfile(params.outFile, &header, upsampledData, upCount);

@@ -104,6 +104,29 @@ void fastSinSIMD(__m256* xs, __m256* result) {
     // (cosVal - 0.5f*sinVal*delta) * delta + sinVal;
     *result = _mm256_fmadd_ps(inner, delta, sinVal);
 }
+void fastSinSIMD_d(__m256d* xs, __m256d* result) {
+    __m256d scale = _mm256_set1_pd(0.5f * SINE_TABLE_SIZE / F_PI);
+    __m256i sinIndex = _mm256_castsi128_si256(_mm256_cvtpd_epi32(*xs * scale));
+
+    scale = _mm256_set1_pd(-2.f * F_PI / SINE_TABLE_SIZE);
+    __m256d sinIndex_f = _mm256_cvtepi32_pd(_mm256_castsi256_si128(sinIndex));
+    __m256d delta =  _mm256_fmadd_pd(scale, sinIndex_f, *xs);
+
+    __m256i offset = _mm256_set1_epi32(SINE_TABLE_SIZE/4);
+    __m256i cosIndex = sinIndex + offset;
+
+    __m256i mask = _mm256_set1_epi32(SINE_TABLE_SIZE-1);
+    sinIndex = sinIndex & mask;
+    cosIndex = cosIndex & mask;
+
+    __m256d sinVal = _mm256_i32gather_pd(sineTable_4q, _mm256_castsi256_si128(sinIndex), sizeof(double));
+    __m256d cosVal = _mm256_i32gather_pd(sineTable_4q, _mm256_castsi256_si128(cosIndex), sizeof(double));
+
+    scale = _mm256_set1_pd(-0.5f);
+    __m256d inner = _mm256_fmadd_pd(scale * sinVal, delta, cosVal);
+
+    *result = _mm256_fmadd_pd(inner, delta, sinVal);
+}
 
 // test 1:
 //      chebsin: 1.644 sec
@@ -183,4 +206,13 @@ float sum8(__m256* x) {
     const __m128 sum = _mm_add_ss(lo, hi);
     
     return _mm_cvtss_f32(sum);
+}
+// https://stackoverflow.com/questions/49941645/get-sum-of-values-stored-in-m256d-with-sse-avx
+double sum4(__m256d* v) {
+    __m128d vlow  = _mm256_castpd256_pd128(*v);
+    __m128d vhigh = _mm256_extractf128_pd(*v, 1); // high 128
+            vlow  = _mm_add_pd(vlow, vhigh);     // reduce down to 128
+
+    __m128d high64 = _mm_unpackhi_pd(vlow, vlow);
+    return  _mm_cvtsd_f64(_mm_add_sd(vlow, high64));  // reduce to scalar
 }

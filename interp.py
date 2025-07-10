@@ -140,14 +140,14 @@ def main(inFile, outFile, startRate, endRate, startHold, endHold, useSlow):
 
     if useSlow:
         outData = np.empty((u.shape[0], 2), dtype=np.int32)
-        outData[:,0] = sinc_interpolation(data[:,0], s, u, 7).astype(np.int32)
-        outData[:,1] = sinc_interpolation(data[:,1], s, u, 63).astype(np.int32)
+        outData[:,0] = sinc_interpolation(data[:,0], s, u).astype(np.int32)
+        outData[:,1] = sinc_interpolation(data[:,1], s, u).astype(np.int32)
     else:
         outData = np.empty((u.shape[0], 2), dtype=np.int32)
-        outData[:,0] = fast_sinc_interp(data[:,0], s, samplerate, u, 7).astype(np.int32)
-        # outData[:,1] = fast_sinc_interp(data[:,1], samplerate, u, 63).astype(np.int32)
+        outData[:,0] = fast_sinc_interp(data[:,0], s, samplerate, u).astype(np.int32)
+        outData[:,1] = fast_sinc_interp(data[:,1], s, samplerate, u).astype(np.int32)
         
-    wavio.write(outFile, outData[:,0].astype(np.int32), samplerate)
+    wavio.write(outFile, outData.astype(np.int32), samplerate, sampwidth=3)
     print("Wrote output data to", outFile)
 
 if __name__ == '__main__':
