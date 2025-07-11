@@ -9,6 +9,8 @@
 #include "fastmath.h"
 
 #define F_PI 3.1415926535f
+// SIMD: 14400 ms, -97.2db
+// No SIMD: 22510 ms, -98.6db
 #define SIMD
 
 typedef enum {
@@ -42,9 +44,10 @@ typedef struct {
     uint32_t dataChunkSize;
 } WavHeader;
 
-WavHeader copyHeader(const WavHeader* orig, uint32_t newDataChunkSize) {
+WavHeader copyHeader(const WavHeader* orig, int upCount) {
     WavHeader newHeader = *orig;
-    newHeader.dataChunkSize = newDataChunkSize;
+    newHeader.dataChunkSize = upCount * (orig->bitDepth/8 * orig->numChannels);
+    newHeader.chunkSize = orig->chunkSize - orig->dataChunkSize + newHeader.dataChunkSize;
     return newHeader;
 }
 
@@ -146,25 +149,37 @@ float* padAndFloat(const int32_t* data, int count, int padSize, float padValue) 
 }
 
 /**
- * @brief Constructs new array with data from given array plus padding on either side.
- * Converts values to doubles.
+ * @brief Extracts the given channel from interleaved audio, converts to float,
+ * and pads with the given value on both sides.
  * 
  * @param data Original data to copy.
- * @param count Number of enteries in original data.
+ * @param channelIndex Index of channel to extract.
+ * @param channelCount Total number of included channels.
+ * @param sampleCount Number of enteries in data.
  * @param padSize Size of padding on each side.
  * @param padValue Value to pad with.
- * @return double* Pointer to padded data array.
+ * @return float* Pointer to padded exracted channel.
  */
-double* padAndDouble(const int32_t* data, int count, int padSize, double padValue) {
-    double* padded = _mm_malloc(sizeof(double) * (count + padSize*2), 32);
-    for (int i = 0; i < count; i++) {
-        padded[i+padSize] = data[i];
+float* extractPadAndFloat(const int32_t* data, int channelIndex, int channelCount, int sampleCount, int padSize, float padValue) {
+    float* padded = _mm_malloc(sizeof(float) * (sampleCount + padSize*2), 32);
+    for (int i = 0; i < sampleCount; i++) {
+        padded[i+padSize] = data[i*channelCount + channelIndex];
     }
     for (int i = 0; i < padSize; i++) {
         padded[i] = padValue;
-        padded[count + padSize + i] = padValue;
+        padded[sampleCount + padSize + i] = padValue;
     }
     return padded;
+}
+
+int32_t* interleaveChannels(int32_t** channels, int channelCount, int sampleCount) {
+    int32_t* outData = malloc(sizeof(int32_t) * channelCount * sampleCount);
+    for (int c = 0; c < channelCount; c++) {
+        for (int n = 0; n < sampleCount; n++) {
+            outData[n*channelCount + c] = channels[c][n];
+        }
+    }
+    return outData;
 }
 
 /**
@@ -246,13 +261,12 @@ double* upsampleCurve(double startK, double endK, double startOffset, double end
  * @param windowSize Size of window around each sample time. Must be odd.
  * @return Array containing the upsampled signal.
  */
-int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, double* upsamples, int upCount, int windowSize) {
+int32_t* fastSincInterp(int sampleRate, int32_t* data, int channelIndex, int channelCount, int dataCount, double* upsamples, int upCount, int windowSize) {
     assert(windowSize%2 == 1);
     struct timespec start, finish;
 
     int paddedWindowSize = ceil(windowSize / 8.f) * 8 + 1;
-    // float* paddedData = padAndFloat(data, dataCount, paddedWindowSize/2, 0);     // 3180 ms
-    double* paddedDataD = padAndDouble(data, dataCount, paddedWindowSize/2, 0);     // 4540 ms, -110db diff (insignificant)
+    float* paddedData = extractPadAndFloat(data, channelIndex, channelCount, dataCount, paddedWindowSize/2, 0);
     int upIndex = 0;
     int32_t* result = _mm_malloc(sizeof(int32_t) * upCount, 32);
 
@@ -263,10 +277,10 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, double* up
     #ifdef SIMD
     // prepare some vectors
     int startN = -paddedWindowSize/2;
-    __m256i inc = _mm256_setr_epi32(0, 1, 2, 3, -1, -1, -1, -1);
-    __m256d PI = _mm256_set1_pd(M_PI);
-    __m256d ones = _mm256_set1_pd(1.f);
-    __m256i offset = _mm256_set1_epi32(4);
+    __m256i inc = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+    __m256 PI = _mm256_set1_ps(M_PI);
+    __m256 ones = _mm256_set1_ps(1.f);
+    __m256i offset = _mm256_set1_epi32(8);
     #endif
 
     // loop over all upsamples
@@ -280,25 +294,29 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, double* up
 
         double sum = 0;
 
-        for (int i = 0; i < paddedWindowSize; i += 4) {
+        for (int i = 0; i < paddedWindowSize; i += 8) {
             // begin data load as soon as possible
             // origN will always be 8 adjacent indecies beginning at (origIndex + i)
-            __m256d dataChunk = _mm256_loadu_pd(paddedDataD + origIndex + i);
+            __m256 dataChunk = _mm256_loadu_ps(paddedData + origIndex + i);
 
+            // Almost all float error is removed by using doubles to subtract instead of floats
             // double dt = upsamples[upIndex]*sampleRate - origN;
-            __m256d origN_f = _mm256_cvtepi32_pd(_mm256_castsi256_si128(origN));
-            __m256d dt = upsample - origN_f;
+            __m256d origN_d_L = _mm256_cvtepi32_pd(_mm256_castsi256_si128(origN)); // lower half
+            __m256d origN_d_U = _mm256_cvtepi32_pd(_mm256_extracti128_si256(origN, 1)); // upper half
+            __m256d dt_L = upsample - origN_d_L;
+            __m256d dt_U = upsample - origN_d_U;
+            __m256 dt = _mm256_set_m128(_mm256_cvtpd_ps(dt_U), _mm256_cvtpd_ps(dt_L));
 
-            __m256d xs = PI * dt;
-            __m256d isZero = _mm256_cmp_pd(xs, _mm256_setzero_pd(), _CMP_EQ_OQ); // dt == 0
-            __m256d sines; fastSinSIMD_d(&xs, &sines);
+            __m256 xs = PI * dt;
+            __m256 isZero = _mm256_cmp_ps(xs, _mm256_setzero_ps(), _CMP_EQ_OQ); // dt == 0
+            __m256 sines; fastSinSIMD(&xs, &sines);
 
-            __m256d divs = sines / xs;
-            __m256d sinc = _mm256_blendv_pd(divs, ones, isZero); // dt == 0 ? 1 : div
+            __m256 divs = sines / xs;
+            __m256 sinc = _mm256_blendv_ps(divs, ones, isZero); // dt == 0 ? 1 : div
             
-            __m256d results =  dataChunk * sinc;
+            __m256 results =  dataChunk * sinc;
 
-            sum += sum4(&results);
+            sum += sum8(&results);
 
             origN = _mm256_add_epi32(origN, offset);
         }
@@ -312,7 +330,7 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, double* up
             
             double dt = upsamples[upIndex]*sampleRate - origN;
             double sinc = dt == 0 ? 1 : fastSinD(M_PI * dt) / (M_PI * dt);
-            sum += paddedDataD[origIndex + i] * sinc;
+            sum += paddedData[origIndex + i] * sinc;
         }
 
         #endif
@@ -322,7 +340,7 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, double* up
     }
     clock_gettime(CLOCK_REALTIME, &finish);
 
-    _mm_free(paddedDataD);
+    _mm_free(paddedData);
 
     printf("Proc took %d milliseconds.\n", (finish.tv_sec - start.tv_sec)*1000 + (finish.tv_nsec - start.tv_nsec) / 1000000L);
     printf("Done upsampling, writing result...\n");
@@ -331,18 +349,19 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int dataCount, double* up
 }
 
 int getDataChunkCount(const WavHeader* header) {
-    return header->dataChunkSize / (header->bitDepth/8);
+    return header->dataChunkSize / (header->bitDepth/8 * header->numChannels);
 }
 
 int32_t* readWavfile(FILE* inFile, const WavHeader* header) {
     int32_t* data = NULL;
     int dataChunkCount = getDataChunkCount(header);
 
+    dataChunkCount *= header->numChannels;
     if (header->bitDepth == 32) {
-        data = _mm_malloc(dataChunkCount * sizeof(int32_t), 32);
+        data = _mm_malloc(dataChunkCount * header->numChannels * sizeof(int32_t), 32);
         fread(data, sizeof(uint32_t), dataChunkCount, inFile);
     } else if (header->bitDepth == 24) {
-        data = _mm_malloc(dataChunkCount * sizeof(int32_t), 32);
+        data = _mm_malloc(dataChunkCount * header->numChannels * sizeof(int32_t), 32);
 
         int valueCount = 0;
         uint8_t chunk[32];
@@ -391,7 +410,7 @@ int32_t* readWavfile(FILE* inFile, const WavHeader* header) {
 }
 
 bool writeWavfile(const char* outPath, const WavHeader* inHeader, const int32_t* data, int count) {
-    WavHeader outHeader = copyHeader(inHeader, count*sizeof(int32_t));
+    WavHeader outHeader = copyHeader(inHeader, count);
     FILE* outFile;
 
     // Check if file exists and confirm overwrite with user
@@ -415,6 +434,8 @@ bool writeWavfile(const char* outPath, const WavHeader* inHeader, const int32_t*
     outFile = fopen(outPath, "wb");
 
     fwrite(&outHeader, sizeof(outHeader), 1, outFile);
+
+    count *= outHeader.numChannels;
     if (outHeader.bitDepth == 32) {
         fwrite(data, sizeof(uint32_t), count, outFile);
     } else if (outHeader.bitDepth == 24) {
@@ -494,15 +515,29 @@ int main(int argc, char const *argv[]) {
     }
     fclose(inFile);
 
+    int32_t** upsampledChannels = malloc(sizeof(void*) * header.numChannels);
     int upCount;
     int origCount = getDataChunkCount(&header);
     double* upsamples = upsampleCurve(params.startSpd, params.endSpd, params.delayTime, params.holdTime, origCount, header.sampleRate, &upCount);
-    int32_t* upsampledData = fastSincInterp(header.sampleRate, data, origCount, upsamples, upCount, 2047);
-    free(upsamples);
+
+    for (int c = 0; c < header.numChannels; c++) {
+        upsampledChannels[c] = fastSincInterp(
+            header.sampleRate, data,
+            c, header.numChannels,
+            origCount,
+            upsamples, upCount,
+            8191 // 8191 much better than 4095 for complicated audio
+        ); 
+    }
+    int32_t* upsampledData = interleaveChannels(upsampledChannels, header.numChannels, upCount);
 
     writeWavfile(params.outFile, &header, upsampledData, upCount);
 
     _mm_free(data);
-    _mm_free(upsampledData);
+    for (int c = 0; c < header.numChannels; c++) {
+        _mm_free(upsampledChannels[c]);
+    }
+    free(upsampledData);
+    free(upsamples);
     return 0;
 }

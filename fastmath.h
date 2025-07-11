@@ -137,6 +137,9 @@ void fastSinSIMD_d(__m256d* xs, __m256d* result) {
 // test 3:
 //      chebsin ternary: 18.87
 //      error: -136db
+// test 4 (in situ):
+//      chebsin error: -88db
+//      lookup error: -97db
 // from https://mooooo.ooo/chebyshev-sine-approximation/
 const float chebCoeffs[6] = {
     -0.10132118f,           // x

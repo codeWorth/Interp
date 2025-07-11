@@ -10,12 +10,12 @@
             "request": "launch",
             "program": "${fileDirname}/${fileBasenameNoExtension}.exe",
             "args": [
-                "-i", "test.wav",
-                "-s", "0.8",
-                "-e", "1.0",
+                "-i", "ysg_intro.wav",
+                "-s", "0.97",
+                "-e", "0.1",
                 "-d", "0",
-                "-H", "0",
-                "test_out.wav"
+                "-H", "2.0",
+                "driving_down.wav"
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
