@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include "string.h"
+#include <string.h>
 #include <assert.h>
 #include <time.h>
 #include "fastmath.h"
@@ -31,24 +31,33 @@ typedef struct {
 typedef struct {
     char chunkID[4];
     uint32_t chunkSize;
+} ChunkHeader;
+
+typedef struct {
     char format[4];
-    char fmtChunkID[4];
-    uint32_t fmtChunkSize;
+} RiffChunk;
+
+typedef struct {
     uint16_t audioFormat;
     uint16_t numChannels;
     uint32_t sampleRate;
     uint32_t byteRate;
     uint16_t blockAlign;
     uint16_t bitDepth;
-    char dataChunkID[4];
-    uint32_t dataChunkSize;
-} WavHeader;
+} FmtChunk;
 
-WavHeader copyHeader(const WavHeader* orig, int upCount) {
-    WavHeader newHeader = *orig;
-    newHeader.dataChunkSize = upCount * (orig->bitDepth/8 * orig->numChannels);
-    newHeader.chunkSize = orig->chunkSize - orig->dataChunkSize + newHeader.dataChunkSize;
-    return newHeader;
+typedef struct {
+    ChunkHeader riffHeader;
+    RiffChunk riffChunk;
+
+    ChunkHeader fmtHeader;
+    FmtChunk fmtChunk;
+
+    ChunkHeader dataHeader;
+} WavInfo;
+
+void writeStr(char* dest, const char* src, int n) {
+    for (int i = 0; i < n; i++) dest[i] = src[i];
 }
 
 ParseResult parseParams(int argc, char const* argv[], Params* params) {
@@ -90,40 +99,6 @@ ParseResult parseParams(int argc, char const* argv[], Params* params) {
         }
     }
     return foundParams == 6 ? EXEC : ERROR;
-}
-
-bool verifyHeader(const WavHeader* header) {
-    if (strncmp(header->chunkID, "RIFF", 4) != 0) {
-        printf("Invalid RIFF header tag %.4s.\n", header->chunkID);
-        return false;
-    }
-
-    if (strncmp(header->format, "WAVE", 4) != 0) {
-        printf("Format %.4s is not .wav, this program only handles wave files currently.\n", header->format);
-        return false;
-    }
-
-    if (strncmp(header->fmtChunkID, "fmt ", 4) != 0) {
-        printf("First chunk %.4s should be format chunk instead.\n", header->format);
-        return false;
-    }
-
-    if (header->fmtChunkSize != 16) {
-        printf("Chunk size %d should be 16 for PCM.\n", header->fmtChunkSize);
-        return false;
-    }
-
-    if (header->audioFormat != 1) {
-        printf("Audio must be uncompressed.\n");
-        return false;
-    }
-
-    if (header->bitDepth != 16 && header->bitDepth != 24 && header->bitDepth != 32) {
-        printf("Bit depth %d must be one of 16, 24, or 32.\n", header->bitDepth);
-        return false;
-    }
-
-    return true;
 }
 
 /**
@@ -239,7 +214,7 @@ double* upsampleCurve(double startK, double endK, double startOffset, double end
 
     printf("Generated %d upsample times.\n", *totalUpsamples);
     if (startHoldSamples >= 1) {
-        printf("\tStart to mid: %d", (int)ceil(startHoldSamples));
+        printf("\tStart to mid: %d\n", (int)ceil(startHoldSamples));
     }
     if (*totalUpsamples - ceil(startHoldSamples+curveSamples) > 0) {
         printf("\tMid to end: %d\n", (int)(*totalUpsamples - ceil(startHoldSamples+curveSamples)));
@@ -348,20 +323,84 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int channelIndex, int cha
     return result;
 }
 
-int getDataChunkCount(const WavHeader* header) {
-    return header->dataChunkSize / (header->bitDepth/8 * header->numChannels);
+int getDataChunkCount(const WavInfo* wavInfo) {
+    return wavInfo->dataHeader.chunkSize / (wavInfo->fmtChunk.bitDepth/8 * wavInfo->fmtChunk.numChannels);
 }
 
-int32_t* readWavfile(FILE* inFile, const WavHeader* header) {
-    int32_t* data = NULL;
-    int dataChunkCount = getDataChunkCount(header);
+bool verifyWavInfo(const WavInfo* wavInfo) {
+    if (strncmp(wavInfo->riffHeader.chunkID, "RIFF", 4) != 0) {
+        printf("Invalid RIFF header tag %.4s.\n", wavInfo->riffHeader.chunkID);
+        return false;
+    }
 
-    dataChunkCount *= header->numChannels;
-    if (header->bitDepth == 32) {
-        data = _mm_malloc(dataChunkCount * header->numChannels * sizeof(int32_t), 32);
+    if (strncmp(wavInfo->riffChunk.format, "WAVE", 4) != 0) {
+        printf("Format %.4s is not .wav, this program only handles wave files currently.\n", wavInfo->riffChunk.format);
+        return false;
+    }
+
+    if (strncmp(wavInfo->fmtHeader.chunkID, "fmt ", 4) != 0) {
+        printf("Format chunk \"%.4s\" should be \"fmt \" instead.\n", wavInfo->fmtHeader.chunkID);
+        return false;
+    }
+
+    if (wavInfo->fmtHeader.chunkSize != 16) {
+        printf("Chunk size %d should be 16 for PCM.\n", wavInfo->fmtHeader.chunkSize);
+        return false;
+    }
+
+    if (wavInfo->fmtChunk.audioFormat != 1) {
+        printf("Audio must be uncompressed.\n");
+        return false;
+    }
+
+    if (wavInfo->fmtChunk.bitDepth != 16 && wavInfo->fmtChunk.bitDepth != 24 && wavInfo->fmtChunk.bitDepth != 32) {
+        printf("Bit depth %d must be one of 16, 24, or 32.\n", wavInfo->fmtChunk.bitDepth);
+        return false;
+    }
+
+    return true;
+}
+
+WavInfo readWavInfo(FILE* inFile) {
+    WavInfo wavInfo;
+
+    fread(&wavInfo.riffHeader, sizeof(ChunkHeader), 1, inFile);
+    fread(&wavInfo.riffChunk, sizeof(RiffChunk), 1, inFile);
+
+    ChunkHeader header; // seek till fmt chunk
+    while (fread(&header, sizeof(ChunkHeader), 1, inFile) > 0) {
+        if (strncmp(header.chunkID, "fmt ", 4) == 0) {
+            wavInfo.fmtHeader = header;
+            break;
+        } else {
+            fseek(inFile, header.chunkSize, SEEK_CUR);
+        }
+    }
+    fread(&wavInfo.fmtChunk, sizeof(FmtChunk), 1, inFile);
+
+    // seek till data chunk
+    while (fread(&header, sizeof(ChunkHeader), 1, inFile) > 0) {
+        if (strncmp(header.chunkID, "data", 4) == 0) {
+            wavInfo.dataHeader = header;
+            break;
+        } else {
+            fseek(inFile, header.chunkSize, SEEK_CUR);
+        }
+    }
+
+    return wavInfo;
+}
+
+int32_t* readWavData(FILE* inFile, const WavInfo* wavInfo) {
+    int32_t* data = NULL;
+    int dataChunkCount = getDataChunkCount(wavInfo);
+
+    dataChunkCount *= wavInfo->fmtChunk.numChannels;
+    if (wavInfo->fmtChunk.bitDepth == 32) {
+        data = _mm_malloc(dataChunkCount * sizeof(int32_t), 32);
         fread(data, sizeof(uint32_t), dataChunkCount, inFile);
-    } else if (header->bitDepth == 24) {
-        data = _mm_malloc(dataChunkCount * header->numChannels * sizeof(int32_t), 32);
+    } else if (wavInfo->fmtChunk.bitDepth == 24) {
+        data = _mm_malloc(dataChunkCount * sizeof(int32_t), 32);
 
         int valueCount = 0;
         uint8_t chunk[32];
@@ -403,16 +442,38 @@ int32_t* readWavfile(FILE* inFile, const WavHeader* header) {
 
         printf("Read all %d values...\n", valueCount);
     } else {
-        printf("Bit depth %d not yet supported.\n", header->bitDepth);
+        printf("Bit depth %d not yet supported.\n", wavInfo->fmtChunk.bitDepth);
     }
 
     return data;
 }
 
-bool writeWavfile(const char* outPath, const WavHeader* inHeader, const int32_t* data, int count) {
-    WavHeader outHeader = copyHeader(inHeader, count);
-    FILE* outFile;
+void writeHeader(FmtChunk fmtChunk, int upCount, FILE* outFile) {
+    ChunkHeader dataHeader;
+    writeStr(dataHeader.chunkID, "data", 4);
+    dataHeader.chunkSize = upCount * (fmtChunk.bitDepth/8 * fmtChunk.numChannels);
 
+    ChunkHeader fmtHeader;
+    writeStr(fmtHeader.chunkID, "fmt ", 4);
+    fmtHeader.chunkSize = 16;
+
+    ChunkHeader riffHeader;
+    writeStr(riffHeader.chunkID, "RIFF", 4);
+    riffHeader.chunkSize = 36 + fmtHeader.chunkSize + dataHeader.chunkSize;
+    RiffChunk riffChunk;
+    writeStr(riffChunk.format, "WAVE", 4);
+
+    fwrite(&riffHeader, sizeof(ChunkHeader), 1, outFile);
+    fwrite(&riffChunk, sizeof(RiffChunk), 1, outFile);
+
+    fwrite(&fmtHeader, sizeof(ChunkHeader), 1, outFile);
+    fwrite(&fmtChunk, sizeof(FmtChunk), 1, outFile);
+
+    fwrite(&dataHeader, sizeof(ChunkHeader), 1, outFile);
+}
+
+bool writeWavfile(const char* outPath, const WavInfo* wavInfo, const int32_t* data, int count) {
+    FILE* outFile;
     // Check if file exists and confirm overwrite with user
     outFile = fopen(outPath, "rb");
     if (outFile != NULL) {
@@ -421,6 +482,7 @@ bool writeWavfile(const char* outPath, const WavHeader* inHeader, const int32_t*
             char resp[5];
             fgets(resp, sizeof(resp), stdin);
             if (resp[0] == 'Y') {
+                fclose(outFile);
                 break;
             } else if (resp[0] == 'N') {
                 printf("Aborting.\n");
@@ -433,12 +495,12 @@ bool writeWavfile(const char* outPath, const WavHeader* inHeader, const int32_t*
 
     outFile = fopen(outPath, "wb");
 
-    fwrite(&outHeader, sizeof(outHeader), 1, outFile);
+    writeHeader(wavInfo->fmtChunk, count, outFile);
 
-    count *= outHeader.numChannels;
-    if (outHeader.bitDepth == 32) {
+    count *= wavInfo->fmtChunk.numChannels;
+    if (wavInfo->fmtChunk.bitDepth == 32) {
         fwrite(data, sizeof(uint32_t), count, outFile);
-    } else if (outHeader.bitDepth == 24) {
+    } else if (wavInfo->fmtChunk.bitDepth == 24) {
         int valueCount = 0;
         uint8_t chunk[32];
 
@@ -500,41 +562,45 @@ int main(int argc, char const *argv[]) {
         return 1;
     }
 
-    WavHeader header;
-    fread(&header, sizeof(header), 1, inFile);
+    WavInfo wavInfo = readWavInfo(inFile);
 
-    if (verifyHeader(&header)) {
+    if (verifyWavInfo(&wavInfo)) {
         printf("Verified file header, continuing...\n");
     } else {
         return 1;
     }
 
-    int32_t* data = readWavfile(inFile, &header);
+    int32_t* data = readWavData(inFile, &wavInfo);
     if (data == NULL) {
         return 1;
     }
     fclose(inFile);
 
-    int32_t** upsampledChannels = malloc(sizeof(void*) * header.numChannels);
+    int32_t** upsampledChannels = malloc(sizeof(void*) * wavInfo.fmtChunk.numChannels);
     int upCount;
-    int origCount = getDataChunkCount(&header);
-    double* upsamples = upsampleCurve(params.startSpd, params.endSpd, params.delayTime, params.holdTime, origCount, header.sampleRate, &upCount);
+    int origCount = getDataChunkCount(&wavInfo);
+    double* upsamples = upsampleCurve(
+        params.startSpd, params.endSpd, 
+        params.delayTime, params.holdTime, 
+        origCount, wavInfo.fmtChunk.sampleRate, 
+        &upCount
+    );
 
-    for (int c = 0; c < header.numChannels; c++) {
+    for (int c = 0; c < wavInfo.fmtChunk.numChannels; c++) {
         upsampledChannels[c] = fastSincInterp(
-            header.sampleRate, data,
-            c, header.numChannels,
+            wavInfo.fmtChunk.sampleRate, data,
+            c, wavInfo.fmtChunk.numChannels,
             origCount,
             upsamples, upCount,
             8191 // 8191 much better than 4095 for complicated audio
         ); 
     }
-    int32_t* upsampledData = interleaveChannels(upsampledChannels, header.numChannels, upCount);
+    int32_t* upsampledData = interleaveChannels(upsampledChannels, wavInfo.fmtChunk.numChannels, upCount);
 
-    writeWavfile(params.outFile, &header, upsampledData, upCount);
+    writeWavfile(params.outFile, &wavInfo, upsampledData, upCount);
 
     _mm_free(data);
-    for (int c = 0; c < header.numChannels; c++) {
+    for (int c = 0; c < wavInfo.fmtChunk.numChannels; c++) {
         _mm_free(upsampledChannels[c]);
     }
     free(upsampledData);

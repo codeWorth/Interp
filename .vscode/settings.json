@@ -8,6 +8,9 @@
         "math.h": "c",
         "time.h": "c",
         "pthread_time.h": "c",
-        "algorithm": "c"
+        "algorithm": "c",
+        "array": "c",
+        "string": "c",
+        "string_view": "c"
     }
 }

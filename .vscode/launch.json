@@ -10,12 +10,12 @@
             "request": "launch",
             "program": "${fileDirname}/${fileBasenameNoExtension}.exe",
             "args": [
-                "-i", "ysg_intro.wav",
-                "-s", "0.97",
-                "-e", "0.1",
-                "-d", "0",
-                "-H", "2.0",
-                "driving_down.wav"
+                "-i", "Z:\\Music\\Studio\\Stereobliss\\Stereobliss 3000\\YSG\\YSG_Vox\\spoken vox att ysg.wav",
+                "-s", "1.0",
+                "-e", "0.9",
+                "-d", "4.8",
+                "-H", "1.0",
+                "Z:\\Music\\Studio\\Stereobliss\\Stereobliss 3000\\YSG\\YSG_Vox\\spoken vox att ysg slide.wav"
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
