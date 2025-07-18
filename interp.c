@@ -404,7 +404,7 @@ bool readWavData(float* dest, FILE* inFile, const WavInfo* wavInfo) {
         while (i < dataCount) {
             int readCount = min(IO_CHUNK_SIZE, dataCount - i);
             fread(chunk, sizeof(int32_t), readCount, inFile);
-            for (int j = 0; j < readCount; j++) dest[i+j] = chunk[i];
+            for (int j = 0; j < readCount; j++) dest[i+j] = chunk[j];
             i += readCount;
         }
 
@@ -439,7 +439,7 @@ bool readWavData(float* dest, FILE* inFile, const WavInfo* wavInfo) {
         while (i < dataCount) {
             int readCount = min(IO_CHUNK_SIZE, dataCount - i);
             fread(chunk, sizeof(int16_t), readCount, inFile);
-            for (int j = 0; j < readCount; j++) dest[i+j] = chunk[i];
+            for (int j = 0; j < readCount; j++) dest[i+j] = chunk[j];
             i += readCount;
         }
 
