@@ -6,6 +6,8 @@
 #include <string.h>
 #include <assert.h>
 #include <time.h>
+#include <process.h>
+#include <windows.h>
 
 #include "fastmath.h"
 #include "wavfile.h"
@@ -14,11 +16,14 @@
 // SIMD: 14400 ms, -97.2db
 // No SIMD: 22510 ms, -98.6db
 #define SIMD
+#define MAX_THREADS 12
+#define MIN_THREAD_WORK 65536
+// #define VERBOSE
 
 typedef enum {
-    EXEC = 0,
-    HELP = 1,
-    ERROR = 2
+    EXEC_R = 0,
+    HELP_R = 1,
+    ERROR_R = 2
 } ParseResult;
 
 typedef struct {
@@ -30,13 +35,26 @@ typedef struct {
     double holdTime;
 } Params;
 
+typedef struct {
+    ChannelView dest;
+    const float* paddedData; 
+    int sampleRate;
+    const double* upsamples;
+    int paddedWindowSize;
+    int tStart;
+    int tEnd;
+    int tIndex;
+} ThreadParams;
+
+void _fastSincInterp(void* tParams_);
+
 ParseResult parseParams(int argc, char const* argv[], Params* params) {
     char const* param = NULL;
     int foundParams = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0) {
-            return HELP;
+            return HELP_R;
         }
 
         if (param == NULL) {
@@ -68,7 +86,7 @@ ParseResult parseParams(int argc, char const* argv[], Params* params) {
             param = NULL;
         }
     }
-    return foundParams == 6 ? EXEC : ERROR;
+    return foundParams == 6 ? EXEC_R : ERROR_R;
 }
 
 /**
@@ -168,18 +186,60 @@ double* upsampleCurve(double startK, double endK, double startOffset, double end
  * @param upCount Number of new samples.
  * @param windowSize How large of a region around each sample to perform sinc interpolation
  */
-void fastSincInterp(ChannelView dest, ChannelView channel, int sampleRate, const double* upsamples, int windowSize) {
+void dispatchFastSincInterp(ChannelView dest, ChannelView channel, int sampleRate, const double* upsamples, int windowSize) {
     struct timespec start, finish;
 
     int paddedWindowSize = ceil(windowSize / 8.f) * 8;
     float* paddedData = _aligned_malloc(sizeof(float) * (channel.count + paddedWindowSize), 32);
     padChannel(paddedData, channel, paddedWindowSize/2, 0.f);
 
-    int upIndex = 0;
-
-    printf("Upsampling %d samples w/ window size = %d...\n", dest.count, windowSize);
+    printf("Upsampling %d samples from channel %d w/ window size = %d...\n", dest.count, channel.offset+1, windowSize);
 
     clock_gettime(CLOCK_REALTIME, &start);
+
+    int threadCount = min(MAX_THREADS, dest.count / MIN_THREAD_WORK);
+    int threadSize = dest.count / threadCount;
+    threadSize = lrint(threadSize / 16.0) * 16; // keep each thread on 64 byte bounadries to avoid false sharing
+
+    if (threadSize < MIN_THREAD_WORK) {
+        ThreadParams params = {dest, paddedData, sampleRate, upsamples, paddedWindowSize, 0, dest.count, 0};
+        _fastSincInterp(&params);
+    } else {
+        printf("Spinning up %d threads...\n", threadCount);
+        HANDLE threads[threadCount];
+        ThreadParams params[threadCount];
+        for (int i = 0; i < threadCount; i++) {
+            int end = i == threadCount-1 ? dest.count : (i+1)*threadSize;
+            params[i] = (ThreadParams){dest, paddedData, sampleRate, upsamples, paddedWindowSize, i*threadSize, end, i};
+            threads[i] = (HANDLE)_beginthread(_fastSincInterp, 0, params + i);
+        }
+        for (int i = 0; i < threadCount; i++) {
+            WaitForSingleObject(threads[i], INFINITE);
+        }
+    }
+
+    clock_gettime(CLOCK_REALTIME, &finish);
+
+    _aligned_free(paddedData);
+
+    printf("Proc took %d milliseconds.\n", (finish.tv_sec - start.tv_sec)*1000 + (finish.tv_nsec - start.tv_nsec) / 1000000L);
+    printf("Done upsampling channel %d...\n", channel.offset+1);
+}
+
+void _fastSincInterp(void* tParams_) {
+    ThreadParams tParams = *(ThreadParams*)tParams_;
+    ChannelView dest = tParams.dest;
+    const float* paddedData = tParams.paddedData;
+    int sampleRate = tParams.sampleRate;
+    const double* upsamples = tParams.upsamples;
+    int paddedWindowSize = tParams.paddedWindowSize;
+    int tStart = tParams.tStart;
+    int tEnd = tParams.tEnd;
+    int tIndex = tParams.tIndex;
+
+    #ifdef VERBOSE
+    printf("Starting thread %d for samples %d .. %d\n", tIndex, tStart, tEnd);
+    #endif
 
     #ifdef SIMD
     // prepare some vectors
@@ -190,7 +250,8 @@ void fastSincInterp(ChannelView dest, ChannelView channel, int sampleRate, const
     #endif
 
     // loop over all upsamples
-    while (upIndex < dest.count) {
+    int upIndex = tStart;
+    while (upIndex < tEnd) {
         int origIndex = upsamples[upIndex] * sampleRate; // gets the nearest orig index to the given time stamp
 
         #ifdef SIMD
@@ -242,14 +303,17 @@ void fastSincInterp(ChannelView dest, ChannelView channel, int sampleRate, const
         #endif
 
         v_put(&dest, upIndex, sum);
+        
+        #ifdef VERBOSE
+        const int chunkSize = 131072;
+        int delta = upIndex - tStart;
+        if (delta % chunkSize == 0 && delta >= chunkSize) {
+            printf("\tFinished chunk %d for thread %d\n", delta/chunkSize, tIndex);
+        }
+        #endif
+
         upIndex++;
     }
-    clock_gettime(CLOCK_REALTIME, &finish);
-
-    _aligned_free(paddedData);
-
-    printf("Proc took %d milliseconds.\n", (finish.tv_sec - start.tv_sec)*1000 + (finish.tv_nsec - start.tv_nsec) / 1000000L);
-    printf("Done upsampling, writing result...\n");
 }
 
 int main(int argc, char const *argv[]) {
@@ -258,10 +322,10 @@ int main(int argc, char const *argv[]) {
     Params params;
     ParseResult result = parseParams(argc, argv, &params);
 
-    if (result == HELP) {
+    if (result == HELP_R) {
         printf("Use the following params:\n\t-i\tin file path\n\t-s\tstart rate\n\t-e\tend rate\n\t-d\tstart delay time\n\t-H\tend hold time\n\tout file path\n");
         return 0;
-    } else if (result == ERROR) {
+    } else if (result == ERROR_R) {
         printf("Some param parse error occured\n");
         return 1;
     }
@@ -299,7 +363,7 @@ int main(int argc, char const *argv[]) {
     float* upsampledData = malloc(sizeof(float) * upCount * wavInfo.fmtChunk.numChannels);
     assert(upsampledData != NULL);
     for (int c = 0; c < wavInfo.fmtChunk.numChannels; c++) {
-        fastSincInterp(
+        dispatchFastSincInterp(
             (ChannelView){upsampledData, c, wavInfo.fmtChunk.numChannels, upCount}, 
             (ChannelView){data, c, wavInfo.fmtChunk.numChannels, origCount},
             wavInfo.fmtChunk.sampleRate, upsamples,
@@ -307,6 +371,7 @@ int main(int argc, char const *argv[]) {
         );
     }
 
+    printf("Finished upsampling, writing result...\n");
     writeWavfile(params.outFile, &wavInfo, upsampledData, upCount * wavInfo.fmtChunk.numChannels);
 
     free(upsampledData);

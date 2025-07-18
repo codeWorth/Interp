@@ -219,7 +219,3 @@ double sum4(__m256d* v) {
     __m128d high64 = _mm_unpackhi_pd(vlow, vlow);
     return  _mm_cvtsd_f64(_mm_add_sd(vlow, high64));  // reduce to scalar
 }
-
-inline int min(int a, int b) {
-    return a < b ? a : b;
-}
