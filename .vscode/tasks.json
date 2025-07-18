@@ -3,11 +3,11 @@
 	"tasks": [
 		{
 			"type": "cppbuild",
-			"label": "C/C++: gcc.exe build active file",
+			"label": "C build active file (gcc)",
 			"command": "C:\\msys64\\mingw64\\bin\\gcc.exe",
 			"args": [
 				"-fdiagnostics-color=always",
-				"-O3", "-march=native",
+				"-O3", "-march=native", "-std=c99",
 				"${file}",
 				"-o",
 				"${fileDirname}\\${fileBasenameNoExtension}.exe"
@@ -23,14 +23,34 @@
 		},
 		{
 			"type": "cppbuild",
-			"label": "C/C++: gcc.exe build active file to asm",
+			"label": "C build active file to asm (gcc)",
 			"command": "C:\\msys64\\mingw64\\bin\\gcc.exe",
 			"args": [
 				"-fdiagnostics-color=always",
-				"-O3", "-S", "-march=native",
+				"-O3", "-S", "-march=native", "-std=c99",
 				"${file}",
 				"-o",
 				"${fileDirname}\\${fileBasenameNoExtension}.asm"
+			],
+			"options": {
+				"cwd": "${fileDirname}"
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build",
+			"detail": "compiler: C:\\msys64\\mingw64\\bin\\gcc.exe"
+		},
+		{
+			"type": "cppbuild",
+			"label": "C build active file for debug (gcc)",
+			"command": "C:\\msys64\\mingw64\\bin\\gcc.exe",
+			"args": [
+				"-fdiagnostics-color=always",
+				"-Og", "-g", "-march=native", "-std=c99",
+				"${file}",
+				"-o",
+				"${fileDirname}\\${fileBasenameNoExtension}.exe"
 			],
 			"options": {
 				"cwd": "${fileDirname}"

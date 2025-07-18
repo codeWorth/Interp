@@ -8,6 +8,7 @@
 #include <time.h>
 #include "fastmath.h"
 
+#define IO_CHUNK_SIZE 2048
 #define F_PI 3.1415926535f
 // SIMD: 14400 ms, -97.2db
 // No SIMD: 22510 ms, -98.6db
@@ -56,6 +57,39 @@ typedef struct {
     ChunkHeader dataHeader;
 } WavInfo;
 
+typedef struct {
+    float* data;
+    int offset;
+    int stride;
+    int count;
+} ChannelView;
+
+inline int min(int a, int b) {
+    return a < b ? a : b;
+}
+
+/**
+ * @brief Retrieve the value stored at the given index of the view of the interleaved data.
+ * 
+ * @param view Channel view to read into.
+ * @param i Index.
+ * @return float Value at the given index.
+ */
+inline float v_get(const ChannelView* view, int i) {
+    return view->data[view->offset + i * view->stride];
+}
+
+/**
+ * @brief Store the given value at the given index in interleaved data.
+ * 
+ * @param view Channel view to write into.
+ * @param i Index.
+ * @param value Value to write.
+ */
+inline void v_put(const ChannelView* view, int i, float value) {
+    view->data[view->offset + i * view->stride] = value;
+}
+
 void writeStr(char* dest, const char* src, int n) {
     for (int i = 0; i < n; i++) dest[i] = src[i];
 }
@@ -102,59 +136,21 @@ ParseResult parseParams(int argc, char const* argv[], Params* params) {
 }
 
 /**
- * @brief Constructs new array with data from given array plus padding on either side.
- * Converts values to floats.
+ * @brief Copy given interleaved channel into dest with padding on either side.
  * 
- * @param data Original data to copy.
- * @param count Number of enteries in original data.
- * @param padSize Size of padding on each side.
+ * @param dest Destination array.
+ * @param channelView Source channel.
+ * @param padWidth Size of padding on each side.
  * @param padValue Value to pad with.
- * @return float* Pointer to padded data array.
  */
-float* padAndFloat(const int32_t* data, int count, int padSize, float padValue) {
-    float* padded = _mm_malloc(sizeof(float) * (count + padSize*2), 32);
-    for (int i = 0; i < count; i++) {
-        padded[i+padSize] = data[i];
+void padChannel(float* dest, ChannelView channelView, int padWidth, float padValue) {
+    for (int i = 0; i < padWidth; i++) {
+        dest[i] = padValue;
+        dest[i+padWidth+channelView.count] = padValue;
     }
-    for (int i = 0; i < padSize; i++) {
-        padded[i] = padValue;
-        padded[count + padSize + i] = padValue;
+    for (int i = 0; i < channelView.count; i++) {
+        dest[i+padWidth] = v_get(&channelView, i);
     }
-    return padded;
-}
-
-/**
- * @brief Extracts the given channel from interleaved audio, converts to float,
- * and pads with the given value on both sides.
- * 
- * @param data Original data to copy.
- * @param channelIndex Index of channel to extract.
- * @param channelCount Total number of included channels.
- * @param sampleCount Number of enteries in data.
- * @param padSize Size of padding on each side.
- * @param padValue Value to pad with.
- * @return float* Pointer to padded exracted channel.
- */
-float* extractPadAndFloat(const int32_t* data, int channelIndex, int channelCount, int sampleCount, int padSize, float padValue) {
-    float* padded = _mm_malloc(sizeof(float) * (sampleCount + padSize*2), 32);
-    for (int i = 0; i < sampleCount; i++) {
-        padded[i+padSize] = data[i*channelCount + channelIndex];
-    }
-    for (int i = 0; i < padSize; i++) {
-        padded[i] = padValue;
-        padded[sampleCount + padSize + i] = padValue;
-    }
-    return padded;
-}
-
-int32_t* interleaveChannels(int32_t** channels, int channelCount, int sampleCount) {
-    int32_t* outData = malloc(sizeof(int32_t) * channelCount * sampleCount);
-    for (int c = 0; c < channelCount; c++) {
-        for (int n = 0; n < sampleCount; n++) {
-            outData[n*channelCount + c] = channels[c][n];
-        }
-    }
-    return outData;
 }
 
 /**
@@ -168,7 +164,7 @@ int32_t* interleaveChannels(int32_t** channels, int channelCount, int sampleCoun
  * @param count Number of samples in data.
  * @param sampleRate Sample rate of data.
  * @param totalUpsamples Location to store the number of samples in the result.
- * @return Array containing the upsampled time stamps.
+ * @return Array containing the upsampled time stamps. Memory must be freed by caller.
  */
 double* upsampleCurve(double startK, double endK, double startOffset, double endOffset, int count, int sampleRate, int* totalUpsamples) {
     // In the original data, data point N is located at T = N / sampleRate
@@ -200,6 +196,7 @@ double* upsampleCurve(double startK, double endK, double startOffset, double end
 
     *totalUpsamples = (int)ceil(startHoldSamples+curveSamples+endHoldSamples); // accounts for each # of samples being possible non-int
     double* upsamples = malloc(sizeof(double) * *totalUpsamples);
+    assert(upsamples != NULL);
 
     for (int i = 0; i < *totalUpsamples; i++) {
         if (i < ceil(startHoldSamples)) {
@@ -226,32 +223,30 @@ double* upsampleCurve(double startK, double endK, double startOffset, double end
 
 /**
  * @brief Performs sinc interpolation to upscale a signal, but windows the signal to upsamples around target sample. 
- * Large differences in sample and upsample have no significant effect, because sinc(X->inf) -> 0
+ * Large differences in sample and upsample time have no significant effect, because sinc(X->inf) -> 0
  * 
- * @param data Signal to be interpolated.
- * @param samples Original time stamps of each sample.
- * @param dataCount Number of data points in the signal.
- * @param upsamples New time stamps.
- * @param upCount Number of data points in the upsampled signal.
- * @param windowSize Size of window around each sample time. Must be odd.
- * @return Array containing the upsampled signal.
+ * @param dest Destination channel in interleaved array.
+ * @param channel Channel from interleaved audio to upsample.
+ * @param sampleRate Sample rate of the original audio.
+ * @param upsamples New time points with which to upsample.
+ * @param upCount Number of new samples.
+ * @param windowSize How large of a region around each sample to perform sinc interpolation
  */
-int32_t* fastSincInterp(int sampleRate, int32_t* data, int channelIndex, int channelCount, int dataCount, double* upsamples, int upCount, int windowSize) {
-    assert(windowSize%2 == 1);
+void fastSincInterp(ChannelView dest, ChannelView channel, int sampleRate, const double* upsamples, int windowSize) {
     struct timespec start, finish;
 
-    int paddedWindowSize = ceil(windowSize / 8.f) * 8 + 1;
-    float* paddedData = extractPadAndFloat(data, channelIndex, channelCount, dataCount, paddedWindowSize/2, 0);
-    int upIndex = 0;
-    int32_t* result = _mm_malloc(sizeof(int32_t) * upCount, 32);
+    int paddedWindowSize = ceil(windowSize / 8.f) * 8;
+    float* paddedData = _aligned_malloc(sizeof(float) * (channel.count + paddedWindowSize), 32);
+    padChannel(paddedData, channel, paddedWindowSize/2, 0.f);
 
-    printf("Upsampling %d samples w/ window size = %d...\n", upCount, windowSize);
+    int upIndex = 0;
+
+    printf("Upsampling %d samples w/ window size = %d...\n", dest.count, windowSize);
 
     clock_gettime(CLOCK_REALTIME, &start);
 
     #ifdef SIMD
     // prepare some vectors
-    int startN = -paddedWindowSize/2;
     __m256i inc = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
     __m256 PI = _mm256_set1_ps(M_PI);
     __m256 ones = _mm256_set1_ps(1.f);
@@ -259,7 +254,7 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int channelIndex, int cha
     #endif
 
     // loop over all upsamples
-    while (upIndex < upCount) {
+    while (upIndex < dest.count) {
         int origIndex = upsamples[upIndex] * sampleRate; // gets the nearest orig index to the given time stamp
 
         #ifdef SIMD
@@ -310,21 +305,19 @@ int32_t* fastSincInterp(int sampleRate, int32_t* data, int channelIndex, int cha
 
         #endif
 
-        result[upIndex] = sum;
+        v_put(&dest, upIndex, sum);
         upIndex++;
     }
     clock_gettime(CLOCK_REALTIME, &finish);
 
-    _mm_free(paddedData);
+    _aligned_free(paddedData);
 
     printf("Proc took %d milliseconds.\n", (finish.tv_sec - start.tv_sec)*1000 + (finish.tv_nsec - start.tv_nsec) / 1000000L);
     printf("Done upsampling, writing result...\n");
-
-    return result;
 }
 
-int getDataChunkCount(const WavInfo* wavInfo) {
-    return wavInfo->dataHeader.chunkSize / (wavInfo->fmtChunk.bitDepth/8 * wavInfo->fmtChunk.numChannels);
+int getDataEntriesCount(const WavInfo* wavInfo) {
+    return wavInfo->dataHeader.chunkSize / (wavInfo->fmtChunk.bitDepth/8);
 }
 
 bool verifyWavInfo(const WavInfo* wavInfo) {
@@ -391,67 +384,78 @@ WavInfo readWavInfo(FILE* inFile) {
     return wavInfo;
 }
 
-int32_t* readWavData(FILE* inFile, const WavInfo* wavInfo) {
-    int32_t* data = NULL;
-    int dataChunkCount = getDataChunkCount(wavInfo);
+/**
+ * @brief Reads the audio data in the given file into the given destination.
+ * The current file read position should be at the start of the data.
+ * 
+ * @param dest Destination array.
+ * @param inFile File to read from.
+ * @param wavInfo Wave file info from header chunks.
+ * @return true Successfully read data.
+ * @return false Some error occured.
+ */
+bool readWavData(float* dest, FILE* inFile, const WavInfo* wavInfo) {
+    int dataCount = getDataEntriesCount(wavInfo);
 
-    dataChunkCount *= wavInfo->fmtChunk.numChannels;
     if (wavInfo->fmtChunk.bitDepth == 32) {
-        data = _mm_malloc(dataChunkCount * sizeof(int32_t), 32);
-        fread(data, sizeof(uint32_t), dataChunkCount, inFile);
+
+        int32_t chunk[IO_CHUNK_SIZE];
+        int i = 0;
+        while (i < dataCount) {
+            int readCount = min(IO_CHUNK_SIZE, dataCount - i);
+            fread(chunk, sizeof(int32_t), readCount, inFile);
+            for (int j = 0; j < readCount; j++) dest[i+j] = chunk[i];
+            i += readCount;
+        }
+
+        printf("Read all %d values...\n", dataCount);
+
     } else if (wavInfo->fmtChunk.bitDepth == 24) {
-        data = _mm_malloc(dataChunkCount * sizeof(int32_t), 32);
 
-        int valueCount = 0;
-        uint8_t chunk[32];
+        int8_t chunk[IO_CHUNK_SIZE/4*3];
+        int bI = 0;
+        int bCount = dataCount*3;
+        while (bI < bCount) {
+            int readSize = min(IO_CHUNK_SIZE/4*3, bCount - bI);
+            fread(chunk, sizeof(uint8_t), readSize, inFile);
 
-        while (valueCount+8 <= dataChunkCount) {
-            fread(chunk, 3, 4, inFile); // read 4 24bit ints to chunk [0, 16)
-            fread(chunk + 16, 3, 4, inFile); // read next 4 24bit ints to chunk [16, 32)
-            
-            __m256i buff = _mm256_loadu_si256((const __m256i*)chunk);
-            __m256i shuffle = _mm256_setr_epi8(
-                -1, 0, 1, 2,
-                -1, 3, 4, 5,
-                -1, 6, 7, 8,
-                -1, 9, 10, 11,
-                -1, 16, 17, 18,
-                -1, 19, 20, 21,
-                -1, 22, 23, 24,
-                -1, 25, 26, 27
-            );
-            __m256i spread = _mm256_shuffle_epi8(buff, shuffle);
-            __m256i shifted = _mm256_srai_epi32(spread, 8);
-            _mm256_store_si256((__m256i*)(data + valueCount), shifted);
+            for (int j = 0; j < readSize; j += 3) {
+                int32_t result = chunk[j+2] << 16; // setting the highest byte first also sets the sign bits
+                result |= (chunk[j+1] << 8) & 0xFF00;
+                result |= chunk[j] & 0xFF;
 
-            valueCount += 8;
-        }
-
-        int remaining = dataChunkCount - valueCount;
-        if (remaining > 0) {
-            fread(&chunk, 3, remaining, inFile);
-            for (int i = 0; i < remaining*3; i += 3) {
-                int32_t val = chunk[i+2] << 24;
-                val >>= 8;
-                val |= chunk[i];
-                val |= chunk[i+1] << 8;
-                data[valueCount] = val;
-                valueCount++;
+                dest[(bI + j)/3] = result;
             }
+            
+            bI += readSize;
         }
 
-        printf("Read all %d values...\n", valueCount);
+        printf("Read all %d values...\n", dataCount);
+
+    } else if (wavInfo->fmtChunk.bitDepth == 16) {
+        
+        int16_t chunk[IO_CHUNK_SIZE];
+        int i = 0;
+        while (i < dataCount) {
+            int readCount = min(IO_CHUNK_SIZE, dataCount - i);
+            fread(chunk, sizeof(int16_t), readCount, inFile);
+            for (int j = 0; j < readCount; j++) dest[i+j] = chunk[i];
+            i += readCount;
+        }
+
+        printf("Read all %d values...\n", dataCount);
+
     } else {
-        printf("Bit depth %d not yet supported.\n", wavInfo->fmtChunk.bitDepth);
+        printf("Bit depth %d not supported.\n", wavInfo->fmtChunk.bitDepth);
     }
 
-    return data;
+    return true;
 }
 
-void writeHeader(FmtChunk fmtChunk, int upCount, FILE* outFile) {
+void writeHeader(FmtChunk fmtChunk, int dataEntriesCount, FILE* outFile) {
     ChunkHeader dataHeader;
     writeStr(dataHeader.chunkID, "data", 4);
-    dataHeader.chunkSize = upCount * (fmtChunk.bitDepth/8 * fmtChunk.numChannels);
+    dataHeader.chunkSize = dataEntriesCount * (fmtChunk.bitDepth/8);
 
     ChunkHeader fmtHeader;
     writeStr(fmtHeader.chunkID, "fmt ", 4);
@@ -472,7 +476,7 @@ void writeHeader(FmtChunk fmtChunk, int upCount, FILE* outFile) {
     fwrite(&dataHeader, sizeof(ChunkHeader), 1, outFile);
 }
 
-bool writeWavfile(const char* outPath, const WavInfo* wavInfo, const int32_t* data, int count) {
+bool writeWavfile(const char* outPath, const WavInfo* wavInfo, const float* data, int count) {
     FILE* outFile;
     // Check if file exists and confirm overwrite with user
     outFile = fopen(outPath, "rb");
@@ -497,44 +501,51 @@ bool writeWavfile(const char* outPath, const WavInfo* wavInfo, const int32_t* da
 
     writeHeader(wavInfo->fmtChunk, count, outFile);
 
-    count *= wavInfo->fmtChunk.numChannels;
     if (wavInfo->fmtChunk.bitDepth == 32) {
-        fwrite(data, sizeof(uint32_t), count, outFile);
+
+        int32_t chunk[IO_CHUNK_SIZE];
+        int i = 0;
+        while (i < count) {
+            int writeCount = min(IO_CHUNK_SIZE, count - i);
+            for (int j = 0; j < writeCount; j++) chunk[j] = data[i+j];
+            fwrite(chunk, sizeof(int32_t), writeCount, outFile);
+            i += writeCount;
+        }
+
     } else if (wavInfo->fmtChunk.bitDepth == 24) {
-        int valueCount = 0;
-        uint8_t chunk[32];
+        
+        uint8_t chunk[IO_CHUNK_SIZE/4*3];
+        int bI = 0;
+        int bCount = count*3;
+        while (bI < bCount) {
+            int writeSize = min(IO_CHUNK_SIZE/4*3, bCount - bI);
 
-        while (valueCount+8 <= count) {
-            __m256i buff = _mm256_load_si256((const __m256i*)(data + valueCount));
-
-            __m256i shuffle = _mm256_setr_epi8(
-                0, 1, 2,
-                4, 5, 6,
-                8, 9, 10,
-                12, 13, 14,
-                -1, -1, -1, -1,
-                16, 17, 18,
-                20, 21, 22,
-                24, 25, 26,
-                28, 29, 30,
-                -1, -1, -1, -1
-            );
-            __m256i spread = _mm256_shuffle_epi8(buff, shuffle);
-            _mm256_store_si256((__m256i*)chunk, spread);
-
-            fwrite(chunk, 3, 4, outFile);
-            fwrite(chunk + 16, 3, 4, outFile);
-
-            valueCount += 8;
-        }
-
-        int remaining = count - valueCount;
-        if (remaining > 0) {
-            for (int i = 0; i < remaining; i++) {
-                int32_t val = data[valueCount + i];
-                fwrite(&val, 3, 1, outFile);
+            for (int j = 0; j < writeSize; j += 3) {
+                int32_t value = data[(bI + j)/3];
+                
+                chunk[j] = value & 0xFF;
+                chunk[j+1] = (value >> 8) & 0xFF;
+                chunk[j+2] = (value >> 16) & 0xFF; 
             }
+            
+            fwrite(chunk, sizeof(uint8_t), writeSize, outFile);
+            bI += writeSize;
         }
+
+    } else if (wavInfo->fmtChunk.bitDepth == 16) {
+
+        int16_t chunk[IO_CHUNK_SIZE];
+        int i = 0;
+        while (i < count) {
+            int writeCount = min(IO_CHUNK_SIZE, count - i);
+            for (int j = 0; j < writeCount; j++) chunk[j] = data[i+j];
+            fwrite(chunk, sizeof(int16_t), writeCount, outFile);
+            i += writeCount;
+        }
+
+    } else {
+        printf("Cannot write %d bit depth!\n", wavInfo->fmtChunk.bitDepth);
+        return false;
     }
 
     fclose(outFile);
@@ -563,22 +574,21 @@ int main(int argc, char const *argv[]) {
     }
 
     WavInfo wavInfo = readWavInfo(inFile);
-
     if (verifyWavInfo(&wavInfo)) {
         printf("Verified file header, continuing...\n");
     } else {
         return 1;
     }
 
-    int32_t* data = readWavData(inFile, &wavInfo);
-    if (data == NULL) {
+    float* data = malloc(sizeof(float) * getDataEntriesCount(&wavInfo));
+    assert(data != NULL);
+    if (!readWavData(data, inFile, &wavInfo)) {
         return 1;
     }
     fclose(inFile);
 
-    int32_t** upsampledChannels = malloc(sizeof(void*) * wavInfo.fmtChunk.numChannels);
     int upCount;
-    int origCount = getDataChunkCount(&wavInfo);
+    int origCount = getDataEntriesCount(&wavInfo) / wavInfo.fmtChunk.numChannels;
     double* upsamples = upsampleCurve(
         params.startSpd, params.endSpd, 
         params.delayTime, params.holdTime, 
@@ -586,23 +596,19 @@ int main(int argc, char const *argv[]) {
         &upCount
     );
 
+    float* upsampledData = malloc(sizeof(float) * upCount * wavInfo.fmtChunk.numChannels);
+    assert(upsampledData != NULL);
     for (int c = 0; c < wavInfo.fmtChunk.numChannels; c++) {
-        upsampledChannels[c] = fastSincInterp(
-            wavInfo.fmtChunk.sampleRate, data,
-            c, wavInfo.fmtChunk.numChannels,
-            origCount,
-            upsamples, upCount,
-            8191 // 8191 much better than 4095 for complicated audio
-        ); 
+        fastSincInterp(
+            (ChannelView){upsampledData, c, wavInfo.fmtChunk.numChannels, upCount}, 
+            (ChannelView){data, c, wavInfo.fmtChunk.numChannels, origCount},
+            wavInfo.fmtChunk.sampleRate, upsamples,
+            8191
+        );
     }
-    int32_t* upsampledData = interleaveChannels(upsampledChannels, wavInfo.fmtChunk.numChannels, upCount);
 
-    writeWavfile(params.outFile, &wavInfo, upsampledData, upCount);
+    writeWavfile(params.outFile, &wavInfo, upsampledData, upCount * wavInfo.fmtChunk.numChannels);
 
-    _mm_free(data);
-    for (int c = 0; c < wavInfo.fmtChunk.numChannels; c++) {
-        _mm_free(upsampledChannels[c]);
-    }
     free(upsampledData);
     free(upsamples);
     return 0;

@@ -1,1 +1,0 @@
-python interp.py -i "Z:\Music\Studio\Stereobliss\Stereobliss 3000\tts\unslowed_stems\tts_section Drums.wav" -s 0.97 -e 1.0 -d 0.75 -H 0.75 "Z:\Music\Studio\Stereobliss\Stereobliss 3000\tts\unslowed_stems\tts_spdup Drums.wav"

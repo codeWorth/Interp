@@ -10,12 +10,12 @@
             "request": "launch",
             "program": "${fileDirname}/${fileBasenameNoExtension}.exe",
             "args": [
-                "-i", "Z:\\Music\\Studio\\Stereobliss\\Stereobliss 3000\\YSG\\YSG_Vox\\spoken vox att ysg.wav",
+                "-i", "test.wav",
                 "-s", "1.0",
                 "-e", "0.9",
-                "-d", "4.8",
+                "-d", "3.0",
                 "-H", "1.0",
-                "Z:\\Music\\Studio\\Stereobliss\\Stereobliss 3000\\YSG\\YSG_Vox\\spoken vox att ysg slide.wav"
+                "test_proc.wav"
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
