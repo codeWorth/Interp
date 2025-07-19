@@ -9,7 +9,8 @@
 #include <process.h>
 #include <windows.h>
 
-#define WINDOW_SIZE 64 // must be a factor of 8
+// large aliasing? spike with window size = 64
+#define WINDOW_SIZE 128 // must be a factor of 8
 #include "fastmath.h"
 #include "wavfile.h"
 
