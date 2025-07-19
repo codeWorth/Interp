@@ -9,6 +9,7 @@
 #include <process.h>
 #include <windows.h>
 
+#define WINDOW_SIZE 64 // must be a factor of 8
 #include "fastmath.h"
 #include "wavfile.h"
 
@@ -40,7 +41,7 @@ typedef struct {
     const float* paddedData; 
     int sampleRate;
     const double* upsamples;
-    int paddedWindowSize;
+    int windowSize;
     int tStart;
     int tEnd;
     int tIndex;
@@ -184,14 +185,14 @@ double* upsampleCurve(double startK, double endK, double startOffset, double end
  * @param sampleRate Sample rate of the original audio.
  * @param upsamples New time points with which to upsample.
  * @param upCount Number of new samples.
- * @param windowSize How large of a region around each sample to perform sinc interpolation
+ * @param windowSize How large of a region around each sample to perform sinc interpolation. Must be a factor of 8
  */
 void dispatchFastSincInterp(ChannelView dest, ChannelView channel, int sampleRate, const double* upsamples, int windowSize) {
+    assert(windowSize % 8 == 0);
     struct timespec start, finish;
 
-    int paddedWindowSize = ceil(windowSize / 8.f) * 8;
-    float* paddedData = _aligned_malloc(sizeof(float) * (channel.count + paddedWindowSize), 32);
-    padChannel(paddedData, channel, paddedWindowSize/2, 0.f);
+    float* paddedData = _aligned_malloc(sizeof(float) * (channel.count + windowSize), 32);
+    padChannel(paddedData, channel, windowSize/2, 0.f);
 
     printf("Upsampling %d samples from channel %d w/ window size = %d...\n", dest.count, channel.offset+1, windowSize);
 
@@ -201,8 +202,8 @@ void dispatchFastSincInterp(ChannelView dest, ChannelView channel, int sampleRat
     int threadSize = dest.count / threadCount;
     threadSize = lrint(threadSize / 16.0) * 16; // keep each thread on 64 byte bounadries to avoid false sharing
 
-    if (threadSize < MIN_THREAD_WORK) {
-        ThreadParams params = {dest, paddedData, sampleRate, upsamples, paddedWindowSize, 0, dest.count, 0};
+    if (threadSize < MIN_THREAD_WORK || threadCount == 1) {
+        ThreadParams params = {dest, paddedData, sampleRate, upsamples, windowSize, 0, dest.count, 0};
         _fastSincInterp(&params);
     } else {
         printf("Spinning up %d threads...\n", threadCount);
@@ -210,7 +211,7 @@ void dispatchFastSincInterp(ChannelView dest, ChannelView channel, int sampleRat
         ThreadParams params[threadCount];
         for (int i = 0; i < threadCount; i++) {
             int end = i == threadCount-1 ? dest.count : (i+1)*threadSize;
-            params[i] = (ThreadParams){dest, paddedData, sampleRate, upsamples, paddedWindowSize, i*threadSize, end, i};
+            params[i] = (ThreadParams){dest, paddedData, sampleRate, upsamples, windowSize, i*threadSize, end, i};
             threads[i] = (HANDLE)_beginthread(_fastSincInterp, 0, params + i);
         }
         for (int i = 0; i < threadCount; i++) {
@@ -232,7 +233,7 @@ void _fastSincInterp(void* tParams_) {
     const float* paddedData = tParams.paddedData;
     int sampleRate = tParams.sampleRate;
     const double* upsamples = tParams.upsamples;
-    int paddedWindowSize = tParams.paddedWindowSize;
+    int windowSize = tParams.windowSize;
     int tStart = tParams.tStart;
     int tEnd = tParams.tEnd;
     int tIndex = tParams.tIndex;
@@ -257,11 +258,11 @@ void _fastSincInterp(void* tParams_) {
         #ifdef SIMD
 
         __m256d upsample = _mm256_set1_pd(upsamples[upIndex]*sampleRate);
-        __m256i origN = _mm256_add_epi32(inc, _mm256_set1_epi32(origIndex - paddedWindowSize/2)); // origN = origIndex - windowSize/2 + i
+        __m256i origN = _mm256_add_epi32(inc, _mm256_set1_epi32(origIndex - windowSize/2)); // origN = origIndex - windowSize/2 + i
 
         double sum = 0;
 
-        for (int i = 0; i < paddedWindowSize; i += 8) {
+        for (int i = 0; i < windowSize; i += 8) {
             // begin data load as soon as possible
             // origN will always be 8 adjacent indecies beginning at (origIndex + i)
             __m256 dataChunk = _mm256_loadu_ps(paddedData + origIndex + i);
@@ -273,12 +274,13 @@ void _fastSincInterp(void* tParams_) {
             __m256d dt_L = upsample - origN_d_L;
             __m256d dt_U = upsample - origN_d_U;
             __m256 dt = _mm256_set_m128(_mm256_cvtpd_ps(dt_U), _mm256_cvtpd_ps(dt_L));
+            __m256 kaiser; fastKaiser_simd(&dt, &kaiser);
 
             __m256 xs = PI * dt;
             __m256 isZero = _mm256_cmp_ps(xs, _mm256_setzero_ps(), _CMP_EQ_OQ); // dt == 0
             __m256 sines; fastSinSIMD(&xs, &sines);
 
-            __m256 divs = sines / xs;
+            __m256 divs = sines / xs * kaiser;
             __m256 sinc = _mm256_blendv_ps(divs, ones, isZero); // dt == 0 ? 1 : div
             
             __m256 results =  dataChunk * sinc;
@@ -292,8 +294,8 @@ void _fastSincInterp(void* tParams_) {
 
         double sum = 0;
 
-        for (int i = 0; i < paddedWindowSize; i++) {
-            int origN = origIndex - paddedWindowSize/2 + i;
+        for (int i = 0; i < windowSize; i++) {
+            int origN = origIndex - windowSize/2 + i;
             
             double dt = upsamples[upIndex]*sampleRate - origN;
             double sinc = dt == 0 ? 1 : fastSinD(M_PI * dt) / (M_PI * dt);
@@ -318,6 +320,7 @@ void _fastSincInterp(void* tParams_) {
 
 int main(int argc, char const *argv[]) {
     GEN_TRIG_TABLE();
+    GEN_BESSEL_TABLE();
 
     Params params;
     ParseResult result = parseParams(argc, argv, &params);
@@ -367,7 +370,7 @@ int main(int argc, char const *argv[]) {
             (ChannelView){upsampledData, c, wavInfo.fmtChunk.numChannels, upCount}, 
             (ChannelView){data, c, wavInfo.fmtChunk.numChannels, origCount},
             wavInfo.fmtChunk.sampleRate, upsamples,
-            8191
+            WINDOW_SIZE
         );
     }
 

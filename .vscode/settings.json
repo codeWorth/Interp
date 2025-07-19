@@ -17,6 +17,7 @@
         "limits": "c",
         "numeric": "c",
         "wavfile.h": "c",
-        "fastmath.h": "c"
+        "fastmath.h": "c",
+        "process.h": "c"
     }
 }

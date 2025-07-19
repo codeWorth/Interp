@@ -219,3 +219,89 @@ double sum4(__m256d* v) {
     __m128d high64 = _mm_unpackhi_pd(vlow, vlow);
     return  _mm_cvtsd_f64(_mm_add_sd(vlow, high64));  // reduce to scalar
 }
+
+// size = 3 -> -99db error
+// size = 4 -> -109db error
+// size = 5 -> -110.15 error
+// size = 6 -> -110.35 error
+#define BESSEL_TABLE_SIZE 5
+#define ALPHA 15
+
+double bessel0(double x) {
+    int k = BESSEL_TABLE_SIZE;
+    assert(k < 10); // We will likely hit long overflow at k >= 10, and its uneeded accuracy anyway
+    double factors[k];
+
+    long pwr2 = 1;
+    long fact = 1;
+    for (int i = 0; i < k; i++) {
+        long product = pwr2 * fact;
+        factors[i] = 1.0 / (double)(product * product); // 1 / (2^k * k!)^2
+        pwr2 *= 2.0;
+        fact *= i+1;
+    }
+
+    double x2 = x*x;
+    double sum = factors[k-1];
+    for (int i = k-2; i >= 0; i--) {
+        sum = factors[i] + x2 * sum;
+    }
+
+    return sum;
+}
+
+float bessel_table[BESSEL_TABLE_SIZE];
+void GEN_BESSEL_TABLE() {
+    double denom = bessel0(ALPHA);
+
+    long pwr2 = 1;
+    long fact = 1;
+    for (int i = 0; i < BESSEL_TABLE_SIZE; i++) {
+        long product = pwr2 * fact;
+        bessel_table[i] = 1.0 / ((double)(product * product) * denom);
+        pwr2 *= 2.0;
+        fact *= i+1;
+    }
+}
+
+double fastBessel0_bakedDiv(double x) {
+    double x2 = x*x;
+
+    double sum = bessel_table[BESSEL_TABLE_SIZE-1];
+    for (int i = BESSEL_TABLE_SIZE-2; i >= 0; i--) {
+        sum = bessel_table[i] + x2 * sum;
+    }
+
+    return sum;
+}
+
+void fastBessel0_bakedDiv_simd(__m256* x2, __m256* result) {
+    __m256 sum = _mm256_set1_ps(bessel_table[BESSEL_TABLE_SIZE-1]);
+    for (int i = BESSEL_TABLE_SIZE-2; i >= 0; i--) {
+        sum = _mm256_fmadd_ps(*x2, sum, _mm256_set1_ps(bessel_table[i]));
+    }
+
+    *result = sum;
+}
+
+double fastKaiser(double x) {
+    const double M = WINDOW_SIZE/2;
+    const double scale = ALPHA / M;
+
+    double x2 = x*x;
+    double y = scale * sqrt(M*M - x2);
+    return fastBessel0_bakedDiv(y);
+}
+
+// W/ kaiser @ 64 window, -130db error, 505ms proc time
+// W/out kaiser @ 64 window, -61db error, 497ms proc time
+void fastKaiser_simd(__m256* x, __m256* result) {
+    __m256 M2 = _mm256_set1_ps((WINDOW_SIZE / 2) * (WINDOW_SIZE / 2));
+    __m256 scale2 = _mm256_set1_ps((float)ALPHA * ALPHA / ((WINDOW_SIZE / 2) * (WINDOW_SIZE / 2)));
+
+    __m256 x2 = _mm256_mul_ps(*x, *x);
+    // we don't have to worry about bounding because of removing the square root here
+    // as long as input values are within 1.25 * WINDOW_SIZE, the result is roughly 0
+    __m256 y2 = scale2 * (M2 - x2);
+    fastBessel0_bakedDiv_simd(&y2, result);
+}
