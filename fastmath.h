@@ -1,6 +1,15 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
+typedef struct {
+    __m256 a;
+    __m256 b;
+} VecPairF;
+typedef struct {
+    __m256i a;
+    __m256i b;
+} VecPairI;
+
 #define SINE_TABLE_POWER 9
 #define SINE_TABLE_SIZE 512
 
@@ -272,13 +281,15 @@ double fastBessel0_bakedDiv(double x) {
     return sum;
 }
 
-inline __m256 fastBessel0_bakedDiv_simd(__m256 x2) {
-    __m256 sum = _mm256_set1_ps(bessel_table[BESSEL_TABLE_SIZE-1]);
+inline VecPairF fastBessel0_bakedDiv_simd(VecPairF x2) {
+    __m256 sum1 = _mm256_set1_ps(bessel_table[BESSEL_TABLE_SIZE-1]);
+    __m256 sum2 = sum1;
     for (int i = BESSEL_TABLE_SIZE-2; i >= 0; i--) {
-        sum = _mm256_fmadd_ps(x2, sum, _mm256_set1_ps(bessel_table[i]));
+        sum1 = _mm256_fmadd_ps(x2.a, sum1, _mm256_set1_ps(bessel_table[i]));
+        sum2 = _mm256_fmadd_ps(x2.b, sum2, _mm256_set1_ps(bessel_table[i]));
     }
 
-    return sum;
+    return (VecPairF){sum1, sum2};
 }
 
 double fastKaiser(double x) {
@@ -292,62 +303,79 @@ double fastKaiser(double x) {
 
 // W/ kaiser @ 64 window, -130db error, 505ms proc time
 // W/out kaiser @ 64 window, -61db error, 497ms proc time
-inline __m256 fastKaiser_simd(__m256 x) {
+inline VecPairF fastKaiser_simd(VecPairF x) {
     __m256 M2 = _mm256_set1_ps((WINDOW_SIZE / 2) * (WINDOW_SIZE / 2));
     __m256 scale2 = _mm256_set1_ps((float)ALPHA * ALPHA / ((WINDOW_SIZE / 2) * (WINDOW_SIZE / 2)));
 
-    __m256 x2 = x*x;
+    __m256 x2_1 = x.a*x.a;
+    __m256 x2_2 = x.b*x.b;
     // we don't have to worry about bounding because of removing the square root here
     // as long as input values are within 1.25 * WINDOW_SIZE, the result is roughly 0
-    __m256 y2 = scale2 * (M2 - x2);
-    return fastBessel0_bakedDiv_simd(y2);
+    __m256 y2_1 = scale2 * (M2 - x2_1);
+    __m256 y2_2 = scale2 * (M2 - x2_2);
+    return fastBessel0_bakedDiv_simd((VecPairF){y2_1, y2_2});
 }
 
 // 6/6 pade approximant is essentially just as performant as 5/5 and gives equiv error to LUT
 // https://www.wolframalpha.com/input?i=%5B6%2F6%5D+pade+of+sin%28x%29
 // operates on a domain of [-pi/2, pi/2], which is significantly better than [-pi, pi]
-inline __m256 padeSin_simd(__m256 x) {
-    __m256i piCount = _mm256_cvtps_epi32(x / _mm256_set1_ps(M_PI));
-    __m256 xNorm = _mm256_fmadd_ps(
+inline VecPairF padeSin_simd(VecPairF x) {
+    __m256i piCount1 = _mm256_cvtps_epi32(x.a * _mm256_set1_ps(1.0/M_PI));
+    __m256i piCount2 = _mm256_cvtps_epi32(x.b * _mm256_set1_ps(1.0/M_PI));
+    __m256 xNorm1 = _mm256_fmadd_ps(
         _mm256_set1_ps(-M_PI), 
-        _mm256_cvtepi32_ps(piCount), 
-        x
+        _mm256_cvtepi32_ps(piCount1), 
+        x.a
     );
-    __m256 x2 = xNorm * xNorm;
+    __m256 xNorm2 = _mm256_fmadd_ps(
+        _mm256_set1_ps(-M_PI), 
+        _mm256_cvtepi32_ps(piCount2), 
+        x.b
+    );
+    __m256 x2_1 = xNorm1 * xNorm1;
+    __m256 x2_2 = xNorm2 * xNorm2;
     
-    __m256i piParity = _mm256_slli_epi32(piCount, 31); // piCount%2 == 0 ? 0x0 : 0x80000000
-    __m256 xNormCorrected = _mm256_castsi256_ps(_mm256_xor_si256(
-        _mm256_castps_si256(xNorm),
-        piParity
+    __m256i piParity1 = _mm256_slli_epi32(piCount1, 31); // piCount%2 == 0 ? 0x0 : 0x80000000
+    __m256i piParity2 = _mm256_slli_epi32(piCount2, 31);
+    __m256 xNormCorrected1 = _mm256_castsi256_ps(_mm256_xor_si256(
+        _mm256_castps_si256(xNorm1),
+        piParity1
     )); // flip sign according to pi parity
+    __m256 xNormCorrected2 = _mm256_castsi256_ps(_mm256_xor_si256(
+        _mm256_castps_si256(xNorm2),
+        piParity2
+    ));
 
-    __m256 numer = _mm256_fmadd_ps(
-        _mm256_set1_ps(0.0029035821005),
-        x2,
+    __m256 numer1 = _mm256_fmadd_ps(
+        _mm256_set1_ps(0.0029035821005), x2_1,
         _mm256_set1_ps(-0.129956552824)
     );
-    numer = _mm256_fmadd_ps(
-        numer,
-        x2,
-        _mm256_set1_ps(1.0)
-    );
-    numer *= xNormCorrected;
+    numer1 = _mm256_fmadd_ps(numer1, x2_1, _mm256_set1_ps(1.0));
+    numer1 *= xNormCorrected1;
 
-    __m256 denom = _mm256_fmadd_ps(
-        _mm256_set1_ps(0.00000726192876828),
-        x2,
+    __m256 numer2 = _mm256_fmadd_ps(
+        _mm256_set1_ps(0.0029035821005), x2_2,
+        _mm256_set1_ps(-0.129956552824)
+    );
+    numer2 = _mm256_fmadd_ps(numer2, x2_2, _mm256_set1_ps(1.0));
+    numer2 *= xNormCorrected2;
+
+    __m256 denom1 = _mm256_fmadd_ps(
+        _mm256_set1_ps(0.00000726192876828), x2_1,
         _mm256_set1_ps(0.000688601074264)
     );
-    denom = _mm256_fmadd_ps(
-        denom,
-        x2,
-        _mm256_set1_ps(0.0367101138426)
-    );
-    denom = _mm256_fmadd_ps(
-        denom,
-        x2,
-        _mm256_set1_ps(1.0)
-    );
+    denom1 = _mm256_fmadd_ps(denom1, x2_1, _mm256_set1_ps(0.0367101138426));
+    denom1 = _mm256_fmadd_ps(denom1, x2_1, _mm256_set1_ps(1.0));
 
-    return numer / denom;
+    __m256 denom2 = _mm256_fmadd_ps(
+        _mm256_set1_ps(0.00000726192876828), x2_2,
+        _mm256_set1_ps(0.000688601074264)
+    );
+    denom2 = _mm256_fmadd_ps(denom2, x2_2, _mm256_set1_ps(0.0367101138426));
+    denom2 = _mm256_fmadd_ps(denom2, x2_2, _mm256_set1_ps(1.0));
+
+    return (VecPairF){
+        numer1 / denom1,
+        numer2 / denom2
+    };
 }

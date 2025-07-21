@@ -40,8 +40,8 @@ typedef struct {
 typedef struct {
     ChannelView dest;
     const float* paddedData; 
-    int sampleRate;
     const double* upsamples;
+    int sampleRate;
     int windowSize;
     int tStart;
     int tEnd;
@@ -204,7 +204,7 @@ void dispatchFastSincInterp(ChannelView dest, ChannelView channel, int sampleRat
     threadSize = lrint(threadSize / 16.0) * 16; // keep each thread on 64 byte bounadries to avoid false sharing
 
     if (threadSize < MIN_THREAD_WORK || threadCount == 1) {
-        ThreadParams params = {dest, paddedData, sampleRate, upsamples, windowSize, 0, dest.count, 0};
+        ThreadParams params = {dest, paddedData, upsamples, sampleRate, windowSize, 0, dest.count, 0};
         _fastSincInterp(&params);
     } else {
         printf("Spinning up %d threads...\n", threadCount);
@@ -212,7 +212,7 @@ void dispatchFastSincInterp(ChannelView dest, ChannelView channel, int sampleRat
         ThreadParams params[threadCount];
         for (int i = 0; i < threadCount; i++) {
             int end = i == threadCount-1 ? dest.count : (i+1)*threadSize;
-            params[i] = (ThreadParams){dest, paddedData, sampleRate, upsamples, windowSize, i*threadSize, end, i};
+            params[i] = (ThreadParams){dest, paddedData, upsamples, sampleRate, windowSize, i*threadSize, end, i};
             threads[i] = (HANDLE)_beginthread(_fastSincInterp, 0, params + i);
         }
         for (int i = 0; i < threadCount; i++) {
@@ -226,6 +226,25 @@ void dispatchFastSincInterp(ChannelView dest, ChannelView channel, int sampleRat
 
     printf("Proc took %d milliseconds.\n", (finish.tv_sec - start.tv_sec)*1000 + (finish.tv_nsec - start.tv_nsec) / 1000000L);
     printf("Done upsampling channel %d...\n", channel.offset+1);
+}
+
+inline VecPairF doublePrecisionDT(VecPairI origN, __m256d upsample) {
+    // Almost all float error is removed by using doubles to subtract instead of floats
+    // double dt = upsamples[upIndex]*sampleRate - origN;
+    __m256d origN_d_L1 = _mm256_cvtepi32_pd(_mm256_castsi256_si128(origN.a)); // lower half
+    __m256d origN_d_U1 = _mm256_cvtepi32_pd(_mm256_extracti128_si256(origN.a, 1)); // upper half
+    __m256d origN_d_L2 = _mm256_cvtepi32_pd(_mm256_castsi256_si128(origN.b));
+    __m256d origN_d_U2 = _mm256_cvtepi32_pd(_mm256_extracti128_si256(origN.b, 1));
+
+    __m256d dt_L1 = upsample - origN_d_L1;
+    __m256d dt_U1 = upsample - origN_d_U1;
+    __m256d dt_L2 = upsample - origN_d_L2;
+    __m256d dt_U2 = upsample - origN_d_U2;
+
+    return (VecPairF){
+        _mm256_set_m128(_mm256_cvtpd_ps(dt_U1), _mm256_cvtpd_ps(dt_L1)),
+        _mm256_set_m128(_mm256_cvtpd_ps(dt_U2), _mm256_cvtpd_ps(dt_L2))
+    };
 }
 
 void _fastSincInterp(void* tParams_) {
@@ -246,7 +265,7 @@ void _fastSincInterp(void* tParams_) {
     // loop over all upsamples
     int upIndex = tParams.tStart;
     while (upIndex < tParams.tEnd) {
-        int origIndex = upsamples[upIndex] * tParams.sampleRate; // gets the nearest orig index to the given time stamp
+        int origIndex = lrint(upsamples[upIndex] * tParams.sampleRate); // gets the nearest orig index to the given time stamp
 
         #ifdef SIMD
 
@@ -258,31 +277,31 @@ void _fastSincInterp(void* tParams_) {
 
         double sum = 0;
 
-        for (int i = 0; i < windowSize; i += 8) {
-            // begin data load as soon as possible
+        for (int i = 0; i < windowSize; i += 16) {
             // origN will always be 8 adjacent indecies beginning at (origIndex + i)
-            __m256 dataChunk = _mm256_loadu_ps(tParams.paddedData + origIndex + i);
+            __m256 dataChunk1 = _mm256_loadu_ps(tParams.paddedData + origIndex + i);
+            __m256 dataChunk2 = _mm256_loadu_ps(tParams.paddedData + origIndex + (i+8));
 
-            // Almost all float error is removed by using doubles to subtract instead of floats
-            // double dt = upsamples[upIndex]*sampleRate - origN;
-            __m256d origN_d_L = _mm256_cvtepi32_pd(_mm256_castsi256_si128(origN)); // lower half
-            __m256d origN_d_U = _mm256_cvtepi32_pd(_mm256_extracti128_si256(origN, 1)); // upper half
-            __m256d dt_L = upsample - origN_d_L;
-            __m256d dt_U = upsample - origN_d_U;
-            __m256 dt = _mm256_set_m128(_mm256_cvtpd_ps(dt_U), _mm256_cvtpd_ps(dt_L));
-            __m256 kaiser = fastKaiser_simd(dt);
+            __m256i origN_next = _mm256_add_epi32(origN, offset);
+            VecPairF dt = doublePrecisionDT((VecPairI){origN, origN_next}, upsample);
+            VecPairF kaiser = fastKaiser_simd(dt);
 
-            __m256 xs = PI * dt;
-            __m256 isZero = _mm256_cmp_ps(xs, _mm256_setzero_ps(), _CMP_EQ_OQ); // dt == 0
-            __m256 sines = padeSin_simd(xs);    // cheb vs LUT vs pade all give basically the same result
-                                                // pade is slightly faster than cheb and ~1.5x faster than LUT
+            __m256 xs1 = PI * dt.a;
+            __m256 xs2 = PI * dt.b;
+            __m256 isZero1 = _mm256_cmp_ps(xs1, _mm256_setzero_ps(), _CMP_EQ_OQ); // dt == 0
+            __m256 isZero2 = _mm256_cmp_ps(xs2, _mm256_setzero_ps(), _CMP_EQ_OQ);
+            VecPairF sines = padeSin_simd((VecPairF){xs1, xs2});    // cheb vs LUT vs pade all give basically the same result
+                                                                    // pade is slightly faster than cheb and ~1.5x faster than LUT
 
-            __m256 divs = sines / xs * kaiser; // sinc calculation, not including zero asymptote
-            __m256 results = _mm256_blendv_ps(dataChunk * divs, dataChunk, isZero); // res = dt != 0 ? data*sinc : data*1
+            __m256 divs1 = sines.a / xs1 * kaiser.a; // sinc calculation, not including zero asymptote
+            __m256 divs2 = sines.b / xs2 * kaiser.b;
+            __m256 results1 = _mm256_blendv_ps(dataChunk1 * divs1, dataChunk1, isZero1); // res = dt != 0 ? data*sinc : data*1
+            __m256 results2 = _mm256_blendv_ps(dataChunk2 * divs2, dataChunk2, isZero2);
+            __m256 results = results1 + results2;
 
             sum += sum8(results);
 
-            origN = _mm256_add_epi32(origN, offset);
+            origN = _mm256_add_epi32(origN_next, offset);
         }
 
         #else

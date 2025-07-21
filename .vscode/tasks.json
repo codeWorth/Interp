@@ -7,7 +7,7 @@
 			"command": "C:\\msys64\\mingw64\\bin\\gcc.exe",
 			"args": [
 				"-fdiagnostics-color=always",
-				"-O3", "-march=native", "-std=c11",
+				"-O3", "-march=native", "-std=c11",  "-ffast-math",
 				"${file}",
 				"-o",
 				"${fileDirname}\\${fileBasenameNoExtension}.exe"
@@ -27,7 +27,7 @@
 			"command": "C:\\msys64\\mingw64\\bin\\gcc.exe",
 			"args": [
 				"-fdiagnostics-color=always",
-				"-O3", "-S", "-march=native", "-std=c11",
+				"-O3", "-S", "-march=native", "-std=c11",  "-ffast-math",
 				"${file}",
 				"-o",
 				"${fileDirname}\\${fileBasenameNoExtension}.asm"
@@ -47,7 +47,7 @@
 			"command": "C:\\msys64\\mingw64\\bin\\gcc.exe",
 			"args": [
 				"-fdiagnostics-color=always",
-				"-O3", "-g", "-march=native", "-std=c11",
+				"-O1", "-g", "-march=native", "-std=c11",  "-ffast-math",
 				"${file}",
 				"-o",
 				"${fileDirname}\\${fileBasenameNoExtension}.exe"
