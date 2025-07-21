@@ -10,7 +10,7 @@
 #include <windows.h>
 
 // large aliasing? spike with window size = 64
-#define WINDOW_SIZE 128 // must be a factor of 8
+#define WINDOW_SIZE 256 // must be a factor of 8
 #include "fastmath.h"
 #include "wavfile.h"
 
@@ -230,43 +230,38 @@ void dispatchFastSincInterp(ChannelView dest, ChannelView channel, int sampleRat
 
 void _fastSincInterp(void* tParams_) {
     ThreadParams tParams = *(ThreadParams*)tParams_;
-    ChannelView dest = tParams.dest;
-    const float* paddedData = tParams.paddedData;
-    int sampleRate = tParams.sampleRate;
     const double* upsamples = tParams.upsamples;
     int windowSize = tParams.windowSize;
-    int tStart = tParams.tStart;
-    int tEnd = tParams.tEnd;
-    int tIndex = tParams.tIndex;
 
     #ifdef VERBOSE
-    printf("Starting thread %d for samples %d .. %d\n", tIndex, tStart, tEnd);
+    printf("Starting thread %d for samples %d .. %d\n", tParams.tIndex, tParams.tStart, tParams.tEnd);
     #endif
 
     #ifdef SIMD
     // prepare some vectors
-    __m256i inc = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
     __m256 PI = _mm256_set1_ps(M_PI);
-    __m256 ones = _mm256_set1_ps(1.f);
     __m256i offset = _mm256_set1_epi32(8);
     #endif
 
     // loop over all upsamples
-    int upIndex = tStart;
-    while (upIndex < tEnd) {
-        int origIndex = upsamples[upIndex] * sampleRate; // gets the nearest orig index to the given time stamp
+    int upIndex = tParams.tStart;
+    while (upIndex < tParams.tEnd) {
+        int origIndex = upsamples[upIndex] * tParams.sampleRate; // gets the nearest orig index to the given time stamp
 
         #ifdef SIMD
 
-        __m256d upsample = _mm256_set1_pd(upsamples[upIndex]*sampleRate);
-        __m256i origN = _mm256_add_epi32(inc, _mm256_set1_epi32(origIndex - windowSize/2)); // origN = origIndex - windowSize/2 + i
+        __m256d upsample = _mm256_set1_pd(upsamples[upIndex] * tParams.sampleRate);
+        __m256i origN = _mm256_add_epi32(
+            _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7), 
+            _mm256_set1_epi32(origIndex - windowSize/2)
+        ); // origN = origIndex - windowSize/2 + i
 
         double sum = 0;
 
         for (int i = 0; i < windowSize; i += 8) {
             // begin data load as soon as possible
             // origN will always be 8 adjacent indecies beginning at (origIndex + i)
-            __m256 dataChunk = _mm256_loadu_ps(paddedData + origIndex + i);
+            __m256 dataChunk = _mm256_loadu_ps(tParams.paddedData + origIndex + i);
 
             // Almost all float error is removed by using doubles to subtract instead of floats
             // double dt = upsamples[upIndex]*sampleRate - origN;
@@ -275,18 +270,17 @@ void _fastSincInterp(void* tParams_) {
             __m256d dt_L = upsample - origN_d_L;
             __m256d dt_U = upsample - origN_d_U;
             __m256 dt = _mm256_set_m128(_mm256_cvtpd_ps(dt_U), _mm256_cvtpd_ps(dt_L));
-            __m256 kaiser; fastKaiser_simd(&dt, &kaiser);
+            __m256 kaiser = fastKaiser_simd(dt);
 
             __m256 xs = PI * dt;
             __m256 isZero = _mm256_cmp_ps(xs, _mm256_setzero_ps(), _CMP_EQ_OQ); // dt == 0
-            __m256 sines; fastSinSIMD(&xs, &sines);
+            __m256 sines = padeSin_simd(xs);    // cheb vs LUT vs pade all give basically the same result
+                                                // pade is slightly faster than cheb and ~1.5x faster than LUT
 
-            __m256 divs = sines / xs * kaiser;
-            __m256 sinc = _mm256_blendv_ps(divs, ones, isZero); // dt == 0 ? 1 : div
-            
-            __m256 results =  dataChunk * sinc;
+            __m256 divs = sines / xs * kaiser; // sinc calculation, not including zero asymptote
+            __m256 results = _mm256_blendv_ps(dataChunk * divs, dataChunk, isZero); // res = dt != 0 ? data*sinc : data*1
 
-            sum += sum8(&results);
+            sum += sum8(results);
 
             origN = _mm256_add_epi32(origN, offset);
         }
@@ -298,20 +292,20 @@ void _fastSincInterp(void* tParams_) {
         for (int i = 0; i < windowSize; i++) {
             int origN = origIndex - windowSize/2 + i;
             
-            double dt = upsamples[upIndex]*sampleRate - origN;
+            double dt = upsamples[upIndex]*tParams.sampleRate - origN;
             double sinc = dt == 0 ? 1 : fastSinD(M_PI * dt) / (M_PI * dt);
-            sum += paddedData[origIndex + i] * sinc;
+            sum += tParams.paddedData[origIndex + i] * sinc;
         }
 
         #endif
 
-        v_put(&dest, upIndex, sum);
+        v_put(&tParams.dest, upIndex, sum);
         
         #ifdef VERBOSE
         const int chunkSize = 131072;
         int delta = upIndex - tStart;
         if (delta % chunkSize == 0 && delta >= chunkSize) {
-            printf("\tFinished chunk %d for thread %d\n", delta/chunkSize, tIndex);
+            printf("\tFinished chunk %d for thread %d\n", delta/chunkSize, tParams.tIndex);
         }
         #endif
 

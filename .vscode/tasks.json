@@ -47,7 +47,7 @@
 			"command": "C:\\msys64\\mingw64\\bin\\gcc.exe",
 			"args": [
 				"-fdiagnostics-color=always",
-				"-Og", "-g", "-march=native", "-std=c11",
+				"-O3", "-g", "-march=native", "-std=c11",
 				"${file}",
 				"-o",
 				"${fileDirname}\\${fileBasenameNoExtension}.exe"

@@ -72,15 +72,15 @@ float fastSinF(float x) {
 // test 1:
 //      simd: 3.214 sec
 //      error: -87.3db
-void fastSinSIMD(__m256* xs, __m256* result) {
+inline __m256 fastSinSIMD(__m256 xs) {
     // x * (0.5f * SINE_TABLE_SIZE / M_PI);
     __m256 scale = _mm256_set1_ps(0.5f * SINE_TABLE_SIZE / F_PI);
-    __m256i sinIndex = _mm256_cvtps_epi32(*xs * scale);
+    __m256i sinIndex = _mm256_cvtps_epi32(xs * scale);
 
     // sinIndex * (-2.f * M_PI / SINE_TABLE_SIZE) + x;
     scale = _mm256_set1_ps(-2.f * F_PI / SINE_TABLE_SIZE);
     __m256 sinIndex_f = _mm256_cvtepi32_ps(sinIndex);
-    __m256 delta =  _mm256_fmadd_ps(scale, sinIndex_f, *xs);
+    __m256 delta =  _mm256_fmadd_ps(scale, sinIndex_f, xs);
 
     // sinIndex + SINE_TABLE_SIZE/4
     __m256i offset = _mm256_set1_epi32(SINE_TABLE_SIZE/4);
@@ -102,7 +102,7 @@ void fastSinSIMD(__m256* xs, __m256* result) {
     __m256 inner = _mm256_fmadd_ps(scale * sinVal, delta, cosVal);
 
     // (cosVal - 0.5f*sinVal*delta) * delta + sinVal;
-    *result = _mm256_fmadd_ps(inner, delta, sinVal);
+    return _mm256_fmadd_ps(inner, delta, sinVal);
 }
 void fastSinSIMD_d(__m256d* xs, __m256d* result) {
     __m256d scale = _mm256_set1_pd(0.5f * SINE_TABLE_SIZE / F_PI);
@@ -170,20 +170,17 @@ float chebSin(float x) {
     return (x - pi_major - pi_minor) * (x + pi_major + pi_minor) * p1 * x;
 }
 
-void chebSinSIMD(__m256* x, __m256* result) {
+inline __m256 chebSinSIMD(__m256 x) {
     __m256 pi_major = _mm256_set1_ps(3.1415927f);
     __m256 pi_minor = _mm256_set1_ps(-0.00000008742278f);
-    __m256i ones = _mm256_set1_epi32(1);
-
-    __m256i piCount = _mm256_cvtps_epi32(*x / pi_major);
-    __m256i diff =  piCount & _mm256_srli_epi32(~piCount, 31);
-
-    __m256 pi2neg = _mm256_set1_ps(-2*F_PI);
-    __m256i offset = _mm256_srai_epi32(piCount, 1) + diff;
-    __m256 offset_f = _mm256_cvtepi32_ps(offset);
-    __m256 xNorm = _mm256_fmadd_ps(pi2neg, offset_f, *x);
-
+    
+    __m256 piCount = _mm256_round_ps(
+        x / _mm256_set1_ps(2*M_PI),
+        _MM_FROUND_TO_NEAREST_INT
+    );
+    __m256 xNorm = _mm256_fmadd_ps(_mm256_set1_ps(-2*M_PI), piCount, x);
     __m256 x2 = xNorm * xNorm;
+
     __m256 p11 = _mm256_set1_ps(chebCoeffs[5]);
     __m256 p9  = _mm256_fmadd_ps(p11, x2, _mm256_set1_ps(chebCoeffs[4]));
     __m256 p7  = _mm256_fmadd_ps(p9, x2, _mm256_set1_ps(chebCoeffs[3])); 
@@ -191,13 +188,13 @@ void chebSinSIMD(__m256* x, __m256* result) {
     __m256 p3  = _mm256_fmadd_ps(p5, x2, _mm256_set1_ps(chebCoeffs[1]));
     __m256 p1  = _mm256_fmadd_ps(p3, x2, _mm256_set1_ps(chebCoeffs[0]));
 
-    *result = (xNorm - pi_major - pi_minor) * (xNorm + pi_major + pi_minor) * p1 * xNorm;
+    return (xNorm - pi_major - pi_minor) * (xNorm + pi_major + pi_minor) * p1 * xNorm;
 }
 
 // per https://stackoverflow.com/questions/13219146/how-to-sum-m256-horizontally
-float sum8(__m256* x) {
-    const __m128 hiQuad = _mm256_extractf128_ps(*x, 1);
-    const __m128 loQuad = _mm256_castps256_ps128(*x);
+inline float sum8(__m256 x) {
+    const __m128 hiQuad = _mm256_extractf128_ps(x, 1);
+    const __m128 loQuad = _mm256_castps256_ps128(x);
     const __m128 sumQuad = _mm_add_ps(loQuad, hiQuad);
 
     const __m128 loDual = sumQuad;
@@ -275,13 +272,13 @@ double fastBessel0_bakedDiv(double x) {
     return sum;
 }
 
-void fastBessel0_bakedDiv_simd(__m256* x2, __m256* result) {
+inline __m256 fastBessel0_bakedDiv_simd(__m256 x2) {
     __m256 sum = _mm256_set1_ps(bessel_table[BESSEL_TABLE_SIZE-1]);
     for (int i = BESSEL_TABLE_SIZE-2; i >= 0; i--) {
-        sum = _mm256_fmadd_ps(*x2, sum, _mm256_set1_ps(bessel_table[i]));
+        sum = _mm256_fmadd_ps(x2, sum, _mm256_set1_ps(bessel_table[i]));
     }
 
-    *result = sum;
+    return sum;
 }
 
 double fastKaiser(double x) {
@@ -295,13 +292,62 @@ double fastKaiser(double x) {
 
 // W/ kaiser @ 64 window, -130db error, 505ms proc time
 // W/out kaiser @ 64 window, -61db error, 497ms proc time
-void fastKaiser_simd(__m256* x, __m256* result) {
+inline __m256 fastKaiser_simd(__m256 x) {
     __m256 M2 = _mm256_set1_ps((WINDOW_SIZE / 2) * (WINDOW_SIZE / 2));
     __m256 scale2 = _mm256_set1_ps((float)ALPHA * ALPHA / ((WINDOW_SIZE / 2) * (WINDOW_SIZE / 2)));
 
-    __m256 x2 = _mm256_mul_ps(*x, *x);
+    __m256 x2 = x*x;
     // we don't have to worry about bounding because of removing the square root here
     // as long as input values are within 1.25 * WINDOW_SIZE, the result is roughly 0
     __m256 y2 = scale2 * (M2 - x2);
-    fastBessel0_bakedDiv_simd(&y2, result);
+    return fastBessel0_bakedDiv_simd(y2);
+}
+
+// 6/6 pade approximant is essentially just as performant as 5/5 and gives equiv error to LUT
+// https://www.wolframalpha.com/input?i=%5B6%2F6%5D+pade+of+sin%28x%29
+// operates on a domain of [-pi/2, pi/2], which is significantly better than [-pi, pi]
+inline __m256 padeSin_simd(__m256 x) {
+    __m256i piCount = _mm256_cvtps_epi32(x / _mm256_set1_ps(M_PI));
+    __m256 xNorm = _mm256_fmadd_ps(
+        _mm256_set1_ps(-M_PI), 
+        _mm256_cvtepi32_ps(piCount), 
+        x
+    );
+    __m256 x2 = xNorm * xNorm;
+    
+    __m256i piParity = _mm256_slli_epi32(piCount, 31); // piCount%2 == 0 ? 0x0 : 0x80000000
+    __m256 xNormCorrected = _mm256_castsi256_ps(_mm256_xor_si256(
+        _mm256_castps_si256(xNorm),
+        piParity
+    )); // flip sign according to pi parity
+
+    __m256 numer = _mm256_fmadd_ps(
+        _mm256_set1_ps(0.0029035821005),
+        x2,
+        _mm256_set1_ps(-0.129956552824)
+    );
+    numer = _mm256_fmadd_ps(
+        numer,
+        x2,
+        _mm256_set1_ps(1.0)
+    );
+    numer *= xNormCorrected;
+
+    __m256 denom = _mm256_fmadd_ps(
+        _mm256_set1_ps(0.00000726192876828),
+        x2,
+        _mm256_set1_ps(0.000688601074264)
+    );
+    denom = _mm256_fmadd_ps(
+        denom,
+        x2,
+        _mm256_set1_ps(0.0367101138426)
+    );
+    denom = _mm256_fmadd_ps(
+        denom,
+        x2,
+        _mm256_set1_ps(1.0)
+    );
+
+    return numer / denom;
 }
