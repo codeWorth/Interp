@@ -9,4 +9,4 @@ add_executable(Interp interp.c)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-set(CMAKE_C_FLAGS "-march=native")
+set(CMAKE_C_FLAGS "-march=native -fno-math-errno")

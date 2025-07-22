@@ -323,6 +323,7 @@ typedef struct {
 // 6/6 pade approximant is essentially just as performant as 5/5 and gives equiv error to LUT
 // https://www.wolframalpha.com/input?i=%5B6%2F6%5D+pade+of+sin%28x%29
 // operates on a domain of [-pi/2, pi/2], which is significantly better than [-pi, pi]
+// Return value does not divide the numerator and denominator so it can be batched with any other divisions
 inline VecDivF padeSin_simd(VecPairF x) {
     __m256i piCount1 = _mm256_cvtps_epi32(x.a * _mm256_set1_ps(1.0/M_PI));
     __m256i piCount2 = _mm256_cvtps_epi32(x.b * _mm256_set1_ps(1.0/M_PI));
