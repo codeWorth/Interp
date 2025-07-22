@@ -316,10 +316,14 @@ inline VecPairF fastKaiser_simd(VecPairF x) {
     return fastBessel0_bakedDiv_simd((VecPairF){y2_1, y2_2});
 }
 
+typedef struct {
+    VecPairF numers;
+    VecPairF denoms;
+} VecDivF;
 // 6/6 pade approximant is essentially just as performant as 5/5 and gives equiv error to LUT
 // https://www.wolframalpha.com/input?i=%5B6%2F6%5D+pade+of+sin%28x%29
 // operates on a domain of [-pi/2, pi/2], which is significantly better than [-pi, pi]
-inline VecPairF padeSin_simd(VecPairF x) {
+inline VecDivF padeSin_simd(VecPairF x) {
     __m256i piCount1 = _mm256_cvtps_epi32(x.a * _mm256_set1_ps(1.0/M_PI));
     __m256i piCount2 = _mm256_cvtps_epi32(x.b * _mm256_set1_ps(1.0/M_PI));
     __m256 xNorm1 = _mm256_fmadd_ps(
@@ -374,8 +378,8 @@ inline VecPairF padeSin_simd(VecPairF x) {
     denom2 = _mm256_fmadd_ps(denom2, x2_2, _mm256_set1_ps(0.0367101138426));
     denom2 = _mm256_fmadd_ps(denom2, x2_2, _mm256_set1_ps(1.0));
 
-    return (VecPairF){
-        numer1 / denom1,
-        numer2 / denom2
+    return (VecDivF){
+        (VecPairF){numer1, numer2},
+        (VecPairF){denom1, denom2}
     };
 }

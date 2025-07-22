@@ -290,11 +290,11 @@ void _fastSincInterp(void* tParams_) {
             __m256 xs2 = PI * dt.b;
             __m256 isZero1 = _mm256_cmp_ps(xs1, _mm256_setzero_ps(), _CMP_EQ_OQ); // dt == 0
             __m256 isZero2 = _mm256_cmp_ps(xs2, _mm256_setzero_ps(), _CMP_EQ_OQ);
-            VecPairF sines = padeSin_simd((VecPairF){xs1, xs2});    // cheb vs LUT vs pade all give basically the same result
+            VecDivF sines = padeSin_simd((VecPairF){xs1, xs2});    // cheb vs LUT vs pade all give basically the same result
                                                                     // pade is slightly faster than cheb and ~1.5x faster than LUT
 
-            __m256 divs1 = sines.a / xs1 * kaiser.a; // sinc calculation, not including zero asymptote
-            __m256 divs2 = sines.b / xs2 * kaiser.b;
+            __m256 divs1 = sines.numers.a * kaiser.a / (xs1 * sines.denoms.a) ; // sinc calculation, not including zero asymptote
+            __m256 divs2 = sines.numers.b  * kaiser.b / (xs2 * sines.denoms.b);
             __m256 results1 = _mm256_blendv_ps(dataChunk1 * divs1, dataChunk1, isZero1); // res = dt != 0 ? data*sinc : data*1
             __m256 results2 = _mm256_blendv_ps(dataChunk2 * divs2, dataChunk2, isZero2);
             __m256 results = results1 + results2;
